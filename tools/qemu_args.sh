@@ -59,6 +59,10 @@ COMMON_QEMU_ARGS="\
     -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
     -drive if=none,format=raw,id=x0,file=./test/build/ext2.img \
     -drive if=none,format=raw,id=x1,file=./test/build/exfat.img \
+    -chardev socket,id=char0,path=/tmp/vhostqemu \
+    -device vhost-user-fs-pci,queue-size=1024,chardev=char0,tag=myfs \
+    -object memory-backend-memfd,id=mem,size=${MEM:-8G},share=on \
+    -numa node,memdev=mem \
 "
 
 if [ "$1" = "iommu" ]; then
