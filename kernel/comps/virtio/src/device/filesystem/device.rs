@@ -100,19 +100,18 @@ impl FileSystemDevice{
 
     fn handle_recv_irq(&self){
         let mut request_queue = self.request_queues[0].disable_irq().lock();
-
         let Ok((_, len)) = request_queue.pop_used() else {
             return;
         };
         self.request_buffers[0].sync(0..len as usize).unwrap();
         let reader = self.request_buffers[0].reader().unwrap();
-        // reader.read_once::F
+        // // reader.read_once::F
         early_print!("Received Init\n");
     }
 }
 
 fn test_device(device: Arc<FileSystemDevice>) {
-    let mut request_queue = device.request_queues[0].lock();
+    let mut request_queue = device.request_queues[0].disable_irq().lock();
     // let request_buffer = device.request_buffers[0].clone();
     let headerin = FuseInHeader{
         len: (size_of::<FuseInitIn>() as u32 + size_of::<FuseInHeader>() as u32),
@@ -138,18 +137,15 @@ fn test_device(device: Arc<FileSystemDevice>) {
     let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
     let initout_bytes = [0u8; 256];
     let concat_req = [headerin_bytes, initin_bytes, &headerout_buffer, &initout_bytes].concat();
-    
     // Send msg
     let mut reader = VmReader::from(concat_req.as_slice());
     let mut writer = device.request_buffers[0].writer().unwrap();
     let len = writer.write(&mut reader);
     let len_in = size_of::<FuseInitIn>() + size_of::<FuseInHeader>();
     device.request_buffers[0].sync(0..len).unwrap();
-    
     let slice_in = DmaStreamSlice::new(&device.request_buffers[0], 0, len_in);
     let slice_out = DmaStreamSlice::new(&device.request_buffers[0], len_in, len);
     request_queue.add_dma_buf(&[&slice_in], &[&slice_out]).unwrap();
-
     if request_queue.should_notify(){
         request_queue.notify();
     }
