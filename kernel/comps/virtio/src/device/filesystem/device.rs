@@ -180,7 +180,7 @@ impl FileSystemDevice{
         // let notification_queue= SpinLock::new(VirtQueue::new(NOTIFICATION_QUEUE_INDEX, 2, transport.as_mut()).unwrap());
         let mut request_queues = Vec::new();
         for i in 0..fs_config.num_request_queues{
-            request_queues.push(SpinLock::new(VirtQueue::new(REQUEST_QUEUE_BASE_INDEX + (i as u16), 2, transport.as_mut()).unwrap()))
+            request_queues.push(SpinLock::new(VirtQueue::new(REQUEST_QUEUE_BASE_INDEX + (i as u16), 4, transport.as_mut()).unwrap()))
         }
 
         let hiprio_buffer = {
@@ -223,7 +223,6 @@ impl FileSystemDevice{
         
         // device.init();
         device.opendir(1, 0);
-        // device.readdir(1, 0, 0, 0);
 
         Ok(())
     }
@@ -249,8 +248,13 @@ impl FileSystemDevice{
             FuseOpcode::FuseReaddir => {
                 let datain = reader.read_val::<FuseReadIn>().unwrap();
                 let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                let inode = reader.read_once::<u64>().unwrap();
+                let off = reader.read_once::<u64>().unwrap();
+                let namelen = reader.read_once::<u32>().unwrap();
+                let type_o = reader.read_once::<u32>().unwrap();
                 // let dataout = reader.read_val::<FuseOpenOut>().unwrap();
                 early_print!("Readdir response received: len = {:?}, error = {:?}\n", headerout.len, headerout.error);
+                early_print!("Readdir response received: inode={:?}, off={:?}, namelen={:?}, type:{:?}\n", inode, off, namelen, type_o);
             },
             FuseOpcode::FuseOpendir => {
                 let datain = reader.read_val::<FuseOpenIn>().unwrap();
@@ -260,6 +264,8 @@ impl FileSystemDevice{
                 early_print!("fh:{:?}\n", dataout.fh);
                 early_print!("open_flags:{:?}\n", dataout.open_flags);
                 early_print!("backing_id:{:?}\n", dataout.backing_id);
+                drop(request_queue);
+                self.readdir(1, 0, 0, 128);
             },
             _ => {
             }
