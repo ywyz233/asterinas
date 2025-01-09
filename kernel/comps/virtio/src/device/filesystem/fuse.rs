@@ -179,3 +179,31 @@ pub struct FuseInitOut {
 	pub max_stack_depth: u32,
 	pub unused: [u32; 6],
 }
+
+#[derive(Debug, Pod, Clone, Copy)]
+#[repr(C)]
+pub struct FuseReadIn {
+    pub fh: u64,
+    pub offset: u64,
+    pub size: u32,
+    pub read_flags: u32,
+    pub lock_owner: u64,
+    pub flags: u32,
+    pub padding: u32,
+}
+
+#[derive(Debug, Pod, Clone, Copy)]
+#[repr(C)]
+pub struct FuseOpenIn {
+    pub flags: u32,
+    pub open_flags: u32,
+}
+
+#[derive(Debug, Pod, Clone, Copy)]
+#[repr(C)]
+pub struct FuseOpenOut {
+    pub fh: u64,
+    pub open_flags: u32,
+    pub backing_id: u32,
+}
+

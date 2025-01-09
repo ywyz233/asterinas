@@ -47,7 +47,8 @@ impl VirtioFsReq{
 pub trait AnyFuseDevice{
     // Send Init Request to Device.
     fn init(&self);
-
+    fn readdir(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
+    fn opendir(&self, nodeid: u64, flags: u32);
 }
 
 pub fn to_opcode(val: u32) -> Result<FuseOpcode, Error>{
