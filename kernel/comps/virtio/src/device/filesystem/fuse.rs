@@ -13,41 +13,52 @@ pub const FUSE_MIN_KERNEL_MINOR_VERSION: u32 = 27;
 
 
 // Flags in Init Message
-const FUSE_ASYNC_READ: u64			= 1 << 0;
-const FUSE_POSIX_LOCKS: u64			= 1 << 1;
-const FUSE_FILE_OPS: u64			= 1 << 2;
-const FUSE_ATOMIC_O_TRUNC: u64		= 1 << 3;
-const FUSE_EXPORT_SUPPORT: u64		= 1 << 4;
-const FUSE_BIG_WRITES: u64			= 1 << 5;
-const FUSE_DONT_MASK: u64			= 1 << 6;
-const FUSE_SPLICE_WRITE: u64		= 1 << 7;
-const FUSE_SPLICE_MOVE: u64			= 1 << 8;
-const FUSE_SPLICE_READ: u64			= 1 << 9;
-const FUSE_FLOCK_LOCKS: u64			= 1 << 10;
-const FUSE_HAS_IOCTL_DIR: u64		= 1 << 11;
-const FUSE_AUTO_INVAL_DATA: u64		= 1 << 12;
-const FUSE_DO_READDIRPLUS: u64		= 1 << 13;
-const FUSE_READDIRPLUS_AUTO: u64	= 1 << 14;
-const FUSE_ASYNC_DIO: u64			= 1 << 15;
-const FUSE_WRITEBACK_CACHE: u64		= 1 << 16;
-const FUSE_NO_OPEN_SUPPORT: u64		= 1 << 17;
-const FUSE_PARALLEL_DIROPS: u64  	= 1 << 18;
-const FUSE_HANDLE_KILLPRIV: u64		= 1 << 19;
-const FUSE_POSIX_ACL: u64			= 1 << 20;
-const FUSE_ABORT_ERROR: u64			= 1 << 21;
-const FUSE_MAX_PAGES: u64			= 1 << 22;
-const FUSE_CACHE_SYMLINKS: u64		= 1 << 23;
-const FUSE_NO_OPENDIR_SUPPORT: u64	= 1 << 24;
-const FUSE_EXPLICIT_INVAL_DATA: u64	= 1 << 25;
-const FUSE_MAP_ALIGNMENT: u64		= 1 << 26;
-const FUSE_SUBMOUNTS: u64			= 1 << 27;
-const FUSE_HANDLE_KILLPRIV_V2: u64	= 1 << 28;
-const FUSE_SETXATTR_EXT: u64		= 1 << 29;
-const FUSE_INIT_EXT: u64			= 1 << 30;
-const FUSE_INIT_RESERVED: u64		= 1 << 31;
+pub const FUSE_ASYNC_READ: u64			= 1 << 0;
+pub const FUSE_POSIX_LOCKS: u64			= 1 << 1;
+pub const FUSE_FILE_OPS: u64			= 1 << 2;
+pub const FUSE_ATOMIC_O_TRUNC: u64		= 1 << 3;
+pub const FUSE_EXPORT_SUPPORT: u64		= 1 << 4;
+pub const FUSE_BIG_WRITES: u64			= 1 << 5;
+pub const FUSE_DONT_MASK: u64			= 1 << 6;
+pub const FUSE_SPLICE_WRITE: u64		= 1 << 7;
+pub const FUSE_SPLICE_MOVE: u64			= 1 << 8;
+pub const FUSE_SPLICE_READ: u64			= 1 << 9;
+pub const FUSE_FLOCK_LOCKS: u64			= 1 << 10;
+pub const FUSE_HAS_IOCTL_DIR: u64		= 1 << 11;
+pub const FUSE_AUTO_INVAL_DATA: u64		= 1 << 12;
+pub const FUSE_DO_READDIRPLUS: u64		= 1 << 13;
+pub const FUSE_READDIRPLUS_AUTO: u64	= 1 << 14;
+pub const FUSE_ASYNC_DIO: u64			= 1 << 15;
+pub const FUSE_WRITEBACK_CACHE: u64		= 1 << 16;
+pub const FUSE_NO_OPEN_SUPPORT: u64		= 1 << 17;
+pub const FUSE_PARALLEL_DIROPS: u64  	= 1 << 18;
+pub const FUSE_HANDLE_KILLPRIV: u64		= 1 << 19;
+pub const FUSE_POSIX_ACL: u64			= 1 << 20;
+pub const FUSE_ABORT_ERROR: u64			= 1 << 21;
+pub const FUSE_MAX_PAGES: u64			= 1 << 22;
+pub const FUSE_CACHE_SYMLINKS: u64		= 1 << 23;
+pub const FUSE_NO_OPENDIR_SUPPORT: u64	= 1 << 24;
+pub const FUSE_EXPLICIT_INVAL_DATA: u64	= 1 << 25;
+pub const FUSE_MAP_ALIGNMENT: u64		= 1 << 26;
+pub const FUSE_SUBMOUNTS: u64			= 1 << 27;
+pub const FUSE_HANDLE_KILLPRIV_V2: u64	= 1 << 28;
+pub const FUSE_SETXATTR_EXT: u64		= 1 << 29;
+pub const FUSE_INIT_EXT: u64			= 1 << 30;
+pub const FUSE_INIT_RESERVED: u64		= 1 << 31;
 /* bits 32..63 get shifted down 32 bits into the flags2 field */
-const FUSE_SECURITY_CTX: u64		= 1u64 << 32;
-const FUSE_HAS_INODE_DAX: u64		= 1u64 << 33;
+pub const FUSE_SECURITY_CTX: u64		= 1u64 << 32;
+pub const FUSE_HAS_INODE_DAX: u64		= 1u64 << 33;
+
+
+/// Delayed write from page cache, file handle is guessed.
+pub const FUSE_WRITE_CACHE: u32 = 1 << 0;
+
+/// `lock_owner` field is valid.
+pub const FUSE_WRITE_LOCKOWNER: u32 = 1 << 1;
+
+/// Kill suid and sgid bits
+pub const FUSE_WRITE_KILL_PRIV: u32 = 1 << 2;
+
 
 bitflags::bitflags! {
 	pub struct FuseInitFlags: u64 {
@@ -194,6 +205,25 @@ pub struct FuseReadIn {
 
 #[repr(C)]
 #[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseWriteIn {
+    pub fh: u64,
+    pub offset: u64,
+    pub size: u32,
+    pub write_flags: u32,
+    pub lock_owner: u64,
+    pub flags: u32,
+    pub padding: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseWriteOut {
+    pub size: u32,
+    pub padding: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
 pub struct FuseDirent {
     pub ino: u64,
     pub off: u64,
@@ -217,3 +247,42 @@ pub struct FuseOpenOut {
     pub backing_id: u32,
 }
 
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseAttr {
+    pub ino: u64,
+    pub size: u64,
+    pub blocks: u64,
+    pub atime: u64,
+    pub mtime: u64,
+    pub ctime: u64,
+    pub atimensec: u32,
+    pub mtimensec: u32,
+    pub ctimensec: u32,
+    pub mode: u32,
+    pub nlink: u32,
+    pub uid: u32,
+    pub gid: u32,
+    pub rdev: u32,
+    pub blksize: u32,
+    pub flags: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseEntryOut {
+    pub nodeid: u64,      /* Inode ID */
+    pub generation: u64,  /* Inode generation: nodeid:gen must be unique for the fs's lifetime */
+    pub entry_valid: u64, /* Cache timeout for the name */
+    pub attr_valid: u64,  /* Cache timeout for the attributes */
+    pub entry_valid_nsec: u32,
+    pub attr_valid_nsec: u32,
+    pub attr: FuseAttr,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseMkdirIn {
+    pub mode: u32, // octal mode
+    pub umask: u32, 
+}

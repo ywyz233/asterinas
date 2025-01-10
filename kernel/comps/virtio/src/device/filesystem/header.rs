@@ -1,7 +1,7 @@
 use ostd::{
     early_print, mm::{VmReader, VmWriter}, Error, Pod
 };
-use crate::device::filesystem::fuse::*;
+use crate::{device::filesystem::fuse::*, queue::VirtQueue};
 use alloc::{
     string::ToString, vec::Vec, vec,
 };
@@ -45,11 +45,19 @@ impl VirtioFsReq{
     // }
 }
 
+/// Define the Fuse Device function interface
 pub trait AnyFuseDevice{
-    // Send Init Request to Device.
+    // Util functions
+    fn send(&self, concat_req: &[u8], request_queue_idx: usize, locked_request_queue: &mut VirtQueue, readable_len: usize, writeable_start: usize);
+    // Functions defined in Fuse
     fn init(&self);
     fn readdir(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
     fn opendir(&self, nodeid: u64, flags: u32);
+    fn mkdir(&self, nodeid: u64, mode: u32, mask: u32, name: &str);
+    fn lookup(&self, nodeid: u64, name: &str);
+    fn open(&self, nodeid: u64, flags: u32);
+    fn read(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
+    fn write(&self, nodeid: u64, fh: u64, offset: u64, data: &str);
 }
 
 ///FuseDirent with the file name
@@ -88,15 +96,27 @@ impl FuseReaddirOut{
                 dirent: dirent,
                 name: file_name,
             });
-            early_print!("len: {:?} ,dirlen: {:?}, name_len: {:?}\n", len, size_of::<FuseDirent>() as u32 + dirent.namelen, dirent.namelen);
+            // early_print!("len: {:?} ,dirlen: {:?}, name_len: {:?}\n", len, size_of::<FuseDirent>() as u32 + dirent.namelen, dirent.namelen);
             len -= size_of::<FuseDirent>() as i32 + dirent.namelen as i32 + pad_len as i32;
         }
         FuseReaddirOut { dirents: dirents }
     }
 }
 
+
+/// Pad the file name/path name to multiple of 8 bytes with '\0'
+/// If repr_c is set, then one additional '\0' will be added at the end of name as if it is originally in name.
+pub fn fuse_pad_str(name: &str, repr_c: bool)-> Vec<u8>{
+    let name_len = name.len() as u32 + if repr_c {1} else {0};
+    let name_pad_len = name_len  + ((8 - (name_len & 0x7)) & 0x7); //Pad to multiple of 8 bytes 
+    let mut prepared_name: Vec<u8> = name.as_bytes().to_vec();
+    prepared_name.resize(name_pad_len as usize, 0);
+    prepared_name
+}
+
+/// Map the opcode value to corresponding enum type
 pub fn to_opcode(val: u32) -> Result<FuseOpcode, Error>{
-    match(val) {
+    match val {
         1 => Ok(FuseOpcode::FuseLookup),
         2 => Ok(FuseOpcode::FuseForget),
         3 => Ok(FuseOpcode::FuseGetattr),
