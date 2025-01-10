@@ -192,6 +192,16 @@ pub struct FuseReadIn {
     pub padding: u32,
 }
 
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseDirent {
+    pub ino: u64,
+    pub off: u64,
+    pub namelen: u32,
+    pub type_: u32,
+    // char name[];
+}
+
 #[derive(Debug, Pod, Clone, Copy)]
 #[repr(C)]
 pub struct FuseOpenIn {

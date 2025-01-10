@@ -1,9 +1,14 @@
 use core::default;
 
 use ostd::{
-    early_print, mm::{DmaDirection, DmaStream, DmaStreamSlice, FrameAllocOptions, VmReader}, sync::SpinLock, trap::TrapFrame, Pod
+    early_print, 
+    mm::{DmaDirection, DmaStream, DmaStreamSlice, FallibleVmRead, FrameAllocOptions, VmReader, VmWriter}, 
+    sync::{SpinLock, RwLock},
+    trap::TrapFrame, 
+    Pod,
+
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::{self, Vec}};
 use crate::{
     device::{
         filesystem::{
@@ -222,7 +227,7 @@ impl FileSystemDevice{
         drop(transport);
         
         // device.init();
-        device.opendir(1, 0);
+        test_device(&device);
 
         Ok(())
     }
@@ -246,15 +251,17 @@ impl FileSystemDevice{
                 early_print!("flags:{:?}\n", dataout.flags);
             },
             FuseOpcode::FuseReaddir => {
-                let datain = reader.read_val::<FuseReadIn>().unwrap();
+                let _ = reader.read_val::<FuseReadIn>().unwrap();
                 let headerout = reader.read_val::<FuseOutHeader>().unwrap();
-                let inode = reader.read_once::<u64>().unwrap();
-                let off = reader.read_once::<u64>().unwrap();
-                let namelen = reader.read_once::<u32>().unwrap();
-                let type_o = reader.read_once::<u32>().unwrap();
+                let readdir_out = FuseReaddirOut::read_dirent(&mut reader, headerout);
                 // let dataout = reader.read_val::<FuseOpenOut>().unwrap();
                 early_print!("Readdir response received: len = {:?}, error = {:?}\n", headerout.len, headerout.error);
-                early_print!("Readdir response received: inode={:?}, off={:?}, namelen={:?}, type:{:?}\n", inode, off, namelen, type_o);
+                for dirent_name in readdir_out.dirents{
+                    let dirent = dirent_name.dirent;
+                    let name = String::from_utf8(dirent_name.name).unwrap();
+                    early_print!("Readdir response received: inode={:?}, off={:?}, namelen={:?}, type:{:?}, filename={:?}\n", 
+                        dirent.ino, dirent.off, dirent.namelen, dirent.type_, name);
+                }
             },
             FuseOpcode::FuseOpendir => {
                 let datain = reader.read_val::<FuseOpenIn>().unwrap();
@@ -264,11 +271,27 @@ impl FileSystemDevice{
                 early_print!("fh:{:?}\n", dataout.fh);
                 early_print!("open_flags:{:?}\n", dataout.open_flags);
                 early_print!("backing_id:{:?}\n", dataout.backing_id);
-                drop(request_queue);
-                self.readdir(1, 0, 0, 128);
+                
             },
             _ => {
             }
         }
+        drop(request_queue);
+        test_device(&self);
     }
+}
+
+
+static TEST_COUNTER: RwLock<u32> = RwLock::new(0);
+pub fn test_device(device: &FileSystemDevice){
+    let mut test_counter = TEST_COUNTER.write();
+    *test_counter += 1;
+    drop(test_counter);
+
+    let test_counter = TEST_COUNTER.read();
+    match *test_counter{
+        1 => device.opendir(1,0),
+        2 => device.readdir(1,0,0,128),
+        _ => ()
+    };
 }
