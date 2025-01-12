@@ -1,3 +1,8 @@
+use core::sync::atomic::{
+    AtomicU64,
+    Ordering,
+};
+
 use ostd::{
     early_print, 
     mm::{DmaDirection, DmaStream, DmaStreamSlice, FrameAllocOptions, VmReader, VmWriter}, 
@@ -30,6 +35,7 @@ pub struct FileSystemDevice{
     hiprio_buffer: DmaStream,
     // notification_buffer: Option<DmaStream>,
     request_buffers: Vec<DmaStream>,
+    options: AtomicU64,
 }
 
 
@@ -91,6 +97,13 @@ impl AnyFuseDevice for FileSystemDevice{
         // if request_queue.should_notify(){
         //     request_queue.notify();
         // }
+    }
+
+    fn handle_init(&self, init_out: FuseInitOut){
+        let self_option = self.options.load(Ordering::Relaxed);
+        let server_options = ((init_out.flags2 as u64) << 32) | (init_out.flags as u64);
+        let options = server_options & self_option;
+        self.options.store(options, Ordering::Relaxed);
     }
 
     fn opendir(&self, nodeid: u64, flags: u32){
@@ -344,6 +357,154 @@ impl AnyFuseDevice for FileSystemDevice{
         self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, writeable_start);
 
     }
+
+
+    fn getattr(&self, nodeid: u64, flags: u32, fh: u64){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseGetattrIn>() as u32),
+            opcode: FuseOpcode::FuseGetattr as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let getattrin = FuseGetattrIn{
+            flags: flags,
+            dummy: 0,
+            fh: fh,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let getattrout_buffer = [0u8; size_of::<FuseAttrOut>()];
+
+
+        let headerin_bytes = headerin.as_bytes();
+        let getattrin_bytes = getattrin.as_bytes();
+        let concat_req = [headerin_bytes, getattrin_bytes, &headerout_buffer, &getattrout_buffer].concat();
+
+        // Send msg
+        let readable_len = size_of::<FuseInHeader>() + size_of::<FuseGetattrIn>();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+
+    fn setattr(
+        &self, 
+        nodeid: u64, 
+        valid: u32, 
+        fh: u64, 
+        size: u64, 
+        lock_owner: u64, 
+        atime: u64, 
+        mtime: u64, 
+        ctime: u64, 
+        atimensec: u32, 
+        mtimensec: u32, 
+        ctimensec: u32,
+        mode: u32,
+        uid: u32,
+        gid: u32,
+    ){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseSetattrIn>() as u32),
+            opcode: FuseOpcode::FuseSetattr as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let setattrin = FuseSetattrIn{
+            valid: valid,
+            padding: 0,
+            fh: fh,
+            size: size,
+            lock_owner: lock_owner,
+            atime: atime,
+            mtime: mtime,
+            ctime: ctime,
+            atimensec: atimensec,
+            mtimensec: mtimensec,
+            ctimensec: ctimensec,
+            mode: mode,
+            unused4: 0,
+            uid: uid,
+            gid: gid,
+            unused5: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let setattrout_buffer = [0u8; size_of::<FuseAttrOut>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let setattrin_bytes = setattrin.as_bytes();
+        let concat_req = [headerin_bytes, setattrin_bytes, &headerout_buffer, &setattrout_buffer].concat();
+
+        // Send msg
+        let readable_len = size_of::<FuseInHeader>() + size_of::<FuseSetattrIn>();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+    fn readlink(&self, nodeid: u64, out_buf_size: u32){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+        let headerin = FuseInHeader{
+            len: size_of::<FuseInHeader>() as u32,
+            opcode: FuseOpcode::FuseReadlink as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let dataout_buffer = vec![0u8; out_buf_size as usize];
+
+        let headerin_bytes = headerin.as_bytes();
+        let dataout_bytes = dataout_buffer.as_slice();
+        let concat_req = [headerin_bytes, &headerout_buffer, dataout_bytes].concat();
+
+        // Send msg
+        let readable_len = size_of::<FuseInHeader>();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+    fn symlink(&self, nodeid: u64, name: &str, link_name: &str){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+        let headerin = FuseInHeader{
+            len: size_of::<FuseInHeader>() as u32 + name.len() as u32 + link_name.len() as u32 + 2,
+            opcode: FuseOpcode::FuseSymlink as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let concat_name = [name, "\0", link_name].concat();
+        let prepared_concat_name = fuse_pad_str(concat_name.as_str(), true);
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let dataout_buffer = [0u8; size_of::<FuseEntryOut>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let prepared_concat_name_bytes = prepared_concat_name.as_slice();
+
+        let concat_req = [headerin_bytes, prepared_concat_name_bytes, &headerout_buffer, &dataout_buffer].concat();
+
+        // Send msg
+        let header_len = size_of::<FuseInHeader>();
+        let readable_len = header_len + name.len() + link_name.len() + 2;
+        let writeable_start = header_len + prepared_concat_name_bytes.len();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, writeable_start);
+    }
+
 }
 
 
@@ -395,6 +556,7 @@ impl FileSystemDevice{
             request_queues: request_queues,
             hiprio_buffer: hiprio_buffer,
             request_buffers: request_buffers,
+            options: AtomicU64::new(FuseInitFlags::empty().bits()),
         });
         let handle_request = {
             let device = device.clone();
@@ -439,6 +601,7 @@ impl FileSystemDevice{
                 early_print!("major:{:?}\n", dataout.major);
                 early_print!("minor:{:?}\n", dataout.minor);
                 early_print!("flags:{:?}\n", dataout.flags);
+                self.handle_init(dataout);
             },
             FuseOpcode::FuseReaddir => {
                 let headerout = reader.read_val::<FuseOutHeader>().unwrap();
@@ -492,9 +655,49 @@ impl FileSystemDevice{
             FuseOpcode::FuseWrite => {
                 let headerout = reader.read_val::<FuseOutHeader>().unwrap();
                 early_print!("Write response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
-                if headerout.len > size_of::<FuseOutHeader> as u32 {
+                if headerout.len > size_of::<FuseOutHeader>() as u32 {
                     let writeout = reader.read_val::<FuseWriteOut>().unwrap();
                     early_print!("Write response received: size={:?}\n", writeout.size);
+                }
+            },
+            FuseOpcode::FuseGetattr => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Getattr response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+                if headerout.len > size_of::<FuseOutHeader>() as u32 {
+                    let attrout = reader.read_val::<FuseAttrOut>().unwrap();
+                    early_print!("Getattr response received: attr_valid={:?}\n", attrout.attr_valid);
+                    early_print!("Getattr response received: flags={:?}, ino={:?}, mode={:?}\n", attrout.attr.flags, attrout.attr.ino, attrout.attr.mode);
+                }
+            },
+            FuseOpcode::FuseSetattr => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Setattr response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+                if headerout.len > size_of::<FuseOutHeader>() as u32 {
+                    let attrout = reader.read_val::<FuseAttrOut>().unwrap();
+                    early_print!("Setattr response received: attr_valid={:?}\n", attrout.attr_valid);
+                    early_print!("Setattr response received: flags={:?}, ino={:?}, mode={:?}\n", attrout.attr.flags, attrout.attr.ino, attrout.attr.mode);
+                }
+            },
+            FuseOpcode::FuseReadlink => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Readlink response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+                
+                if headerout.len > size_of::<FuseOutHeader>() as u32 {
+                    let mut dataout_buffer = vec![0u8; headerout.len as usize - size_of::<FuseOutHeader>()];
+                    let mut writer = VmWriter::from(dataout_buffer.as_mut_slice());
+                    writer.write(&mut reader);
+                    let symlink = String::from_utf8(dataout_buffer).unwrap();
+                    early_print!("Readlink response received: symlink={:?}\n", symlink);
+                }
+            },
+            FuseOpcode::FuseSymlink => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Symlink response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+
+                if headerout.len > size_of::<FuseOutHeader>() as u32 {
+                    let dataout = reader.read_val::<FuseEntryOut>().unwrap();
+                    early_print!("Symlink response received: nodeid={:?}, generation={:?}, entry_valid={:?}, attr_valid={:?}\n", 
+                        dataout.nodeid, dataout.generation, dataout.entry_valid, dataout.attr_valid);
                 }
             }
             _ => {
@@ -516,13 +719,33 @@ pub fn test_device(device: &FileSystemDevice){
 
 
     match test_counter{
-        1 => device.opendir(1,0),
-        2 => device.readdir(1,0,0,128),
+        // 1 => device.opendir(1,0),
+        // 2 => device.readdir(1,0,0,128),
+        // 3 => device.lookup(1, "testl"),
         // 3 => device.mkdir(1, 0o755, 0o777, "MkdirTest"),
-        3 => device.lookup(1, "testh"),
-        4 => device.open(2, 2),
-        5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
-        6 => device.read(2, 1, 0, 128),
+        // 3 => device.lookup(1, "testh"),
+        // 4 => device.open(2, 2),
+        // 5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
+        // 6 => device.read(2, 1, 0, 128),
+        // 7 => device.getattr(2, FUSE_GETATTR_FH, 1),
+        // 8 => device.setattr(
+        //     2,
+        //     FuseSetattrValid::MODE.bits(), 
+        //     1,
+        //     0, 
+        //     0, 
+        //     0, 
+        //     0 , 
+        //     0 , 
+        //     0, 
+        //     0,
+        //     0,
+        //     0o100755,
+        //     0,
+        //     0,
+        // ),
+        // 4 => device.symlink(1, "test_guest", "testh"),
+        // 4 => device.readlink(2, 128),
         _ => ()
     };
 }

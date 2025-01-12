@@ -51,6 +51,8 @@ pub trait AnyFuseDevice{
     fn send(&self, concat_req: &[u8], request_queue_idx: usize, locked_request_queue: &mut VirtQueue, readable_len: usize, writeable_start: usize);
     // Functions defined in Fuse
     fn init(&self);
+    fn handle_init(&self, init_out: FuseInitOut);
+
     fn readdir(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
     fn opendir(&self, nodeid: u64, flags: u32);
     fn mkdir(&self, nodeid: u64, mode: u32, mask: u32, name: &str);
@@ -58,6 +60,29 @@ pub trait AnyFuseDevice{
     fn open(&self, nodeid: u64, flags: u32);
     fn read(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
     fn write(&self, nodeid: u64, fh: u64, offset: u64, data: &str);
+
+    fn getattr(&self, nodeid: u64, flags: u32, fh: u64);
+    fn setattr(
+        &self, 
+        nodeid: u64, 
+        valid: u32, 
+        fh: u64, 
+        size: u64, 
+        lock_owner: u64, 
+        atime: u64, 
+        mtime: u64, 
+        ctime: u64, 
+        atimensec: u32, 
+        mtimensec: u32, 
+        ctimensec: u32,
+        mode: u32,
+        uid: u32,
+        gid: u32,
+    );
+    fn readlink(&self, nodeid: u64, out_buf_size: u32);
+    /// name: the name of symbolic link file, 
+    /// link_name: the name of target
+    fn symlink(&self, nodeid: u64, name: &str, link_name: &str);
 }
 
 ///FuseDirent with the file name
