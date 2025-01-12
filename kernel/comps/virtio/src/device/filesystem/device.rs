@@ -213,6 +213,130 @@ impl AnyFuseDevice for FileSystemDevice{
         self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
     }
 
+    fn rmdir(&self, nodeid: u64, name: &str){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        // let mkdirin = FuseMkdirIn {
+        //     mode: mode,
+        //     umask: umask,
+        // };
+        let prepared_name = fuse_pad_str(name, true);
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + name.len() as u32 + 1),
+            opcode: FuseOpcode::FuseRmdir as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        // let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        // let entryout_buffer = [0u8; size_of::<FuseEntryOut>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        // let mkdirin_bytes = mkdirin.as_bytes();
+        let prepared_name_bytes = prepared_name.as_slice(); 
+        let concat_req = [headerin_bytes, prepared_name_bytes].concat();
+        
+        //Send msg
+        let readable_len = size_of::<FuseInHeader>() + prepared_name.len();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+    fn unlink(&self, nodeid: u64, name: &str){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        // let mkdirin = FuseMkdirIn {
+        //     mode: mode,
+        //     umask: umask,
+        // };
+        let prepared_name = fuse_pad_str(name, true);
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + name.len() as u32 + 1),
+            opcode: FuseOpcode::FuseUnlink as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        // let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        // let entryout_buffer = [0u8; size_of::<FuseEntryOut>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        // let mkdirin_bytes = mkdirin.as_bytes();
+        let prepared_name_bytes = prepared_name.as_slice(); 
+        let concat_req = [headerin_bytes, prepared_name_bytes].concat();
+        
+        //Send msg
+        let readable_len = size_of::<FuseInHeader>() + prepared_name.len();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+    fn link(&self, nodeid: u64, oldnodeid: u64, name: &str){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let linkin = FuseLinkIn {
+            oldnodeid: oldnodeid,
+        };
+
+        let prepared_name = fuse_pad_str(name, true);
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseLinkIn>() as u32 + name.len() as u32 + 1),
+            opcode: FuseOpcode::FuseLink as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let entryout_buffer = [0u8; size_of::<FuseEntryOut>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let linkin_bytes = linkin.as_bytes();
+        let prepared_name_bytes = prepared_name.as_slice(); 
+        let concat_req = [headerin_bytes, linkin_bytes, prepared_name_bytes, &headerout_buffer, &entryout_buffer].concat();
+        
+        //Send msg
+        let readable_len = size_of::<FuseInHeader>() + size_of::<FuseLinkIn>() + prepared_name.len();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+
+    fn statfs(&self, nodeid: u64){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        // let prepared_name = fuse_pad_str(name, true);
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32),
+            opcode: FuseOpcode::FuseStatfs as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let kstatfsout_buffer = [0u8; size_of::<FuseKstatfs>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        // let prepared_name_bytes = prepared_name.as_slice(); 
+        let concat_req = [headerin_bytes, &headerout_buffer, &kstatfsout_buffer].concat();
+        
+        //Send msg
+        let readable_len = size_of::<FuseInHeader>();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
     fn lookup(&self, nodeid: u64, name: &str){
         let mut request_queue = self.request_queues[0].disable_irq().lock();
         let prepared_name = fuse_pad_str(name, true);
@@ -344,6 +468,45 @@ impl AnyFuseDevice for FileSystemDevice{
         self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, writeable_start);
 
     }
+
+    fn copyfilerange(&self, nodeid: u64, fh_in: u64, off_in: u64, nodeid_out: u64, fh_out: u64, off_out: u64, len: u64, flags: u64){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let copyfilerangein = FuseCopyfilerangeIn{
+            fh_in: fh_in,
+            off_in: off_in,
+            nodeid_out: nodeid_out,
+            fh_out: fh_out,
+            off_out: off_out,
+            len: len,
+            flags: flags,
+        };
+        let headerin = FuseInHeader{
+            len: size_of::<FuseInHeader>() as u32 + size_of::<FuseCopyfilerangeIn>() as u32,
+            opcode: FuseOpcode::FuseCopyFileRange as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let writeout_buffer = [0u8; size_of::<FuseWriteOut>()];
+
+        // let prepared_data_bytes = prepared_data.as_slice();
+        let copyfilerangein_bytes = copyfilerangein.as_bytes();
+        let headerin_bytes = headerin.as_bytes();
+        let concat_req = [headerin_bytes, copyfilerangein_bytes, &headerout_buffer, &writeout_buffer].concat();
+
+        // Send msg
+        let header_len = size_of::<FuseInHeader>() + size_of::<FuseCopyfilerangeIn>();
+        let readable_len = header_len ;
+        let writeable_start = header_len;
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, writeable_start);
+
+    }
 }
 
 
@@ -464,6 +627,20 @@ impl FileSystemDevice{
                 early_print!("Mkdir response received: nodeid={:?}, generation={:?}, entry_valid={:?}, attr_valid={:?}\n", 
                     dataout.nodeid, dataout.generation, dataout.entry_valid, dataout.attr_valid);
             },
+            FuseOpcode::FuseLink => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                let dataout = reader.read_val::<FuseEntryOut>().unwrap();
+                early_print!("Link response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+                early_print!("Link response received: nodeid={:?}, generation={:?}, entry_valid={:?}, attr_valid={:?}\n", 
+                    dataout.nodeid, dataout.generation, dataout.entry_valid, dataout.attr_valid);
+            },
+            FuseOpcode::FuseStatfs => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                let dataout = reader.read_val::<FuseKstatfs>().unwrap();
+                early_print!("Statfs response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+                early_print!("Statfs response received: blocks={:?}, bfree={:?}, bavail={:?}, files={:?}, ffree={:?}, bsize={:?}, namelen={:?}, frsize={:?}, padding={:?}, spare={:?}\n", 
+                    dataout.blocks, dataout.bfree, dataout.bavail, dataout.files, dataout.ffree, dataout.bsize, dataout.namelen, dataout.frsize, dataout.padding, dataout.spare);
+            },
             FuseOpcode::FuseLookup => {
                 let headerout = reader.read_val::<FuseOutHeader>().unwrap();
                 let dataout = reader.read_val::<FuseEntryOut>().unwrap();
@@ -497,6 +674,14 @@ impl FileSystemDevice{
                     early_print!("Write response received: size={:?}\n", writeout.size);
                 }
             }
+            FuseOpcode::FuseCopyFileRange => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("CopyFileRange response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+                if headerout.len > size_of::<FuseOutHeader> as u32 {
+                    let writeout = reader.read_val::<FuseWriteOut>().unwrap();
+                    early_print!("CopyFileRange response received: size={:?}\n", writeout.size);
+                }
+            }
             _ => {
             }
         };
@@ -516,13 +701,42 @@ pub fn test_device(device: &FileSystemDevice){
 
 
     match test_counter{
+
+        // copyfilerange function test
         1 => device.opendir(1,0),
         2 => device.readdir(1,0,0,128),
-        // 3 => device.mkdir(1, 0o755, 0o777, "MkdirTest"),
         3 => device.lookup(1, "testh"),
+
         4 => device.open(2, 2),
-        5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
-        6 => device.read(2, 1, 0, 128),
+        5 => device.lookup(1, "testg"),
+        6 => device.open(3, 2),
+        7 => device.copyfilerange(2, 1, 0, 3, 2, 0, 6, 0),
+
+
+
+
+
+        // 3 => device.statfs(1),
+        // 4 => device.mkdir(1, 0o755, 0o777, "newdir"),
+        // 5 => device.readdir(1,0,0,128),
+        // 6 => device.statfs(1),
+
+
+        // 3 => device.lookup(1, "testh"),
+        // 4 => device.link(1,2,"newtesth"),
+
+        // 3 => device.unlink(1, "testh"),
+        // 4 => device.readdir(1,0,0,128),
+        // // 3 => device.mkdir(1, 0o755, 0o777, "MkdirTest"),
+        // 4 => device.open(2, 2),
+        // 5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
+        // 6 => device.read(2, 1, 0, 128),
+
+
+        // // 7 => device.mkdir(1, 0o755, 0o777, "newtest"),
+        // 7 => device.readdir(1,0,0,128),
+        // 8 => device.rmdir(1,"hht"),
+        // 9 => device.readdir(1,0,0,128),
         _ => ()
     };
 }

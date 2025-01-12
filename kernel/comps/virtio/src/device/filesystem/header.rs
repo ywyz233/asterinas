@@ -58,6 +58,11 @@ pub trait AnyFuseDevice{
     fn open(&self, nodeid: u64, flags: u32);
     fn read(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
     fn write(&self, nodeid: u64, fh: u64, offset: u64, data: &str);
+    fn rmdir(&self, nodeid: u64, name: &str);
+    fn unlink(&self, nodeid: u64, name: &str);
+    fn link(&self, nodeid: u64, oldnodeid: u64, name: &str);
+    fn statfs(&self, nodeid: u64);
+    fn copyfilerange(&self, nodeid: u64, fh_in: u64, off_in: u64, nodeid_out: u64, fh_out: u64, off_out: u64, len: u64, flags: u64);
 }
 
 ///FuseDirent with the file name
