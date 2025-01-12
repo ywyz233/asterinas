@@ -286,3 +286,32 @@ pub struct FuseMkdirIn {
     pub mode: u32, // octal mode
     pub umask: u32, 
 }
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseMknodIn {
+    pub mode: u32, // octal mode
+	pub rdev: u32,
+    pub umask: u32,
+	pub padding: u32, 
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseRenameIn {
+	pub newdir: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseRename2In {
+	pub newdir: u64,
+	pub flags: u32,
+	pub padding: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseForgetIn {
+    pub nlookup: u64,
+}

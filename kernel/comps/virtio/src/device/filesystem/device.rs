@@ -1,12 +1,9 @@
 use ostd::{
-    early_print, 
-    mm::{DmaDirection, DmaStream, DmaStreamSlice, FrameAllocOptions, VmReader, VmWriter}, 
-    sync::{SpinLock, RwLock},
-    trap::TrapFrame, 
-    Pod,
+    early_print, early_println, mm::{DmaDirection, DmaStream, DmaStreamSlice, FrameAllocOptions, VmReader, VmWriter}, sync::{RwLock, SpinLock}, trap::TrapFrame, Pod
 
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec, vec};
+use typeflags_util::NotOp;
 use crate::{
     device::{
         filesystem::{
@@ -45,6 +42,19 @@ impl AnyFuseDevice for FileSystemDevice{
         locked_request_queue.add_dma_buf(&[&slice_in], &[&slice_out]).unwrap();
         if locked_request_queue.should_notify(){
             locked_request_queue.notify();
+        }
+    }
+
+    fn sendhp(&self, concat_req: &[u8], locked_hp_queue: &mut VirtQueue, readable_len: usize, writeable_start: usize){
+        let mut reader = VmReader::from(concat_req);
+        let mut writer = self.hiprio_buffer.writer().unwrap();
+        let len = writer.write(&mut reader);
+        self.hiprio_buffer.sync(0..len).unwrap();
+        let slice_in = DmaStreamSlice::new(&self.hiprio_buffer, 0, readable_len);
+        let slice_out = DmaStreamSlice::new(&self.hiprio_buffer, writeable_start, len);
+        locked_hp_queue.add_dma_buf(&[&slice_in], &[&slice_out]).unwrap();
+        if locked_hp_queue.should_notify(){
+            locked_hp_queue.notify();
         }
     }
 
@@ -344,6 +354,154 @@ impl AnyFuseDevice for FileSystemDevice{
         self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, writeable_start);
 
     }
+
+    fn mknod(&self, nodeid: u64, mode: u32, umask: u32, name: &str){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let mknodin = FuseMknodIn {
+            mode: mode,
+            rdev: 0, // 普通文件为0，字符/块设备需要单独考虑
+            umask: umask,
+            padding: 0,
+        };
+        let prepared_name = fuse_pad_str(name, true);
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseMknodIn>() as u32 + name.len() as u32 + 1),
+            opcode: FuseOpcode::FuseMknod as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let entryout_buffer = [0u8; size_of::<FuseEntryOut>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let mknodin_bytes = mknodin.as_bytes();
+        let prepared_name_bytes = prepared_name.as_slice(); 
+        let concat_req = [headerin_bytes, mknodin_bytes, prepared_name_bytes, &headerout_buffer, &entryout_buffer].concat();
+        
+        //Send msg
+        let readable_len = size_of::<FuseInHeader>() + size_of::<FuseMknodIn>() + prepared_name.len();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+    fn rename(&self, nodeid: u64, newdir: u64, oldname: &str, newname: &str){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let renamein = FuseRenameIn{
+            newdir: newdir,
+        };
+
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseRenameIn>() as u32 + oldname.len() as u32 + 1 + newname.len() as u32 + 1),
+            opcode: FuseOpcode::FuseRename as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let mut cat_names = Vec::new();
+        cat_names.extend_from_slice(oldname.as_bytes());
+        cat_names.push(b'\0');
+        cat_names.extend_from_slice(newname.as_bytes());
+        cat_names.push(b'\0');
+
+        let padding_len = (8 - (cat_names.len() % 8)) % 8;
+        cat_names.extend(vec![0u8; padding_len]);
+
+        let cat_names_bytes = cat_names.as_slice();
+
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+
+        let renamein_bytes = renamein.as_bytes();
+        let headerin_bytes = headerin.as_bytes();
+        let concat_req = [headerin_bytes, renamein_bytes, cat_names_bytes, &headerout_buffer].concat();
+
+        // Send msg
+        let header_len = size_of::<FuseInHeader>() + size_of::<FuseRenameIn>() + cat_names_bytes.len();
+        let readable_len = header_len;
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+    fn rename2(&self, nodeid: u64, newdir: u64, flags: u32, oldname: &str, newname: &str){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let renamein = FuseRename2In{
+            newdir: newdir,
+            flags: flags,
+            padding: 0,
+        };
+
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseRename2In>() as u32 + oldname.len() as u32 + 1 + newname.len() as u32 + 1),
+            opcode: FuseOpcode::FuseRename2 as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let mut cat_names = Vec::new();
+        cat_names.extend_from_slice(oldname.as_bytes());
+        cat_names.push(b'\0');
+        cat_names.extend_from_slice(newname.as_bytes());
+        cat_names.push(b'\0');
+
+        let padding_len = (8 - (cat_names.len() % 8)) % 8;
+        cat_names.extend(vec![0u8; padding_len]);
+
+        let cat_names_bytes = cat_names.as_slice();
+
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+
+        let renamein_bytes = renamein.as_bytes();
+        let headerin_bytes = headerin.as_bytes();
+        let concat_req = [headerin_bytes, renamein_bytes, cat_names_bytes, &headerout_buffer].concat();
+
+        // Send msg
+        let header_len = size_of::<FuseInHeader>() + size_of::<FuseRename2In>() + cat_names_bytes.len();
+        let readable_len = header_len;
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+    fn forget(&self, nodeid: u64, nlookup: u64){
+        let mut hp_queue = self.hiprio_queue.disable_irq().lock();
+
+        let forgetin = FuseForgetIn{
+            nlookup: nlookup,
+        };
+
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseForgetIn>() as u32),
+            opcode: FuseOpcode::FuseForget as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+
+        let forgetin_bytes = forgetin.as_bytes();
+        let headerin_bytes = headerin.as_bytes();
+        let concat_req = [headerin_bytes, forgetin_bytes].concat();
+
+        // Send msg
+        let header_len = size_of::<FuseInHeader>() + size_of::<FuseForgetIn>();
+        let readable_len = header_len;
+        // self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+        self.sendhp(concat_req.as_slice(), &mut (*hp_queue), readable_len, readable_len);
+    }
 }
 
 
@@ -488,7 +646,7 @@ impl FileSystemDevice{
                     let data_utf8 = String::from_utf8(dataout_buf).unwrap();
                     early_print!("Read response received: data={:?}\n", data_utf8);
                 }
-            }
+            },
             FuseOpcode::FuseWrite => {
                 let headerout = reader.read_val::<FuseOutHeader>().unwrap();
                 early_print!("Write response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
@@ -496,6 +654,21 @@ impl FileSystemDevice{
                     let writeout = reader.read_val::<FuseWriteOut>().unwrap();
                     early_print!("Write response received: size={:?}\n", writeout.size);
                 }
+            },
+            FuseOpcode::FuseMknod => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                let dataout = reader.read_val::<FuseEntryOut>().unwrap();
+                early_print!("Mknod response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+                early_print!("Mknod response received: nodeid={:?}, generation={:?}, entry_valid={:?}, attr_valid={:?}\n", 
+                    dataout.nodeid, dataout.generation, dataout.entry_valid, dataout.attr_valid);
+            },
+            FuseOpcode::FuseRename => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Rename response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+            },
+            FuseOpcode::FuseRename2 => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Rename2 response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
             }
             _ => {
             }
@@ -506,7 +679,7 @@ impl FileSystemDevice{
 }
 
 
-static TEST_COUNTER: RwLock<u32> = RwLock::new(0);
+static TEST_COUNTER: RwLock<u32> = RwLock::new(13);
 pub fn test_device(device: &FileSystemDevice){
     let test_counter = {
         let mut test_counter = TEST_COUNTER.write();
@@ -523,6 +696,13 @@ pub fn test_device(device: &FileSystemDevice){
         4 => device.open(2, 2),
         5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
         6 => device.read(2, 1, 0, 128),
+        // 7 => device.mknod(1, 0o755, 0o777, "dwx"),
+        8 => device.lookup(1, "dwxs"), // dwxs: nodeid 2
+        9 => device.lookup(1, "dwxnews"), // dwxnews: nodeid 3
+        10 => device.lookup(2, "dwx"), // dwx: nodeid 4
+        11 => device.open(4, 2), // dwx: fh 0
+        12 => device.write(4, 0, 0, "Hello from Guest!!\n"),
+        13 => device.rename2(2, 3, 2, "dwx", "dwxnew"),
         _ => ()
     };
 }

@@ -49,6 +49,7 @@ impl VirtioFsReq{
 pub trait AnyFuseDevice{
     // Util functions
     fn send(&self, concat_req: &[u8], request_queue_idx: usize, locked_request_queue: &mut VirtQueue, readable_len: usize, writeable_start: usize);
+    fn sendhp(&self, concat_req: &[u8], locked_hp_queue: &mut VirtQueue, readable_len: usize, writeable_start: usize);
     // Functions defined in Fuse
     fn init(&self);
     fn readdir(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
@@ -58,6 +59,10 @@ pub trait AnyFuseDevice{
     fn open(&self, nodeid: u64, flags: u32);
     fn read(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
     fn write(&self, nodeid: u64, fh: u64, offset: u64, data: &str);
+    fn mknod(&self, nodeid: u64, mode: u32, mask: u32, name: &str);
+    fn rename(&self, nodeid: u64, newdir: u64, oldname: &str, newname: &str);
+    fn rename2(&self, nodeid: u64, newdir: u64, flags: u32, oldname: &str, newname: &str);
+    fn forget(&self, nodeid: u64, nlookup: u64);
 }
 
 ///FuseDirent with the file name
