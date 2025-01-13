@@ -9,7 +9,7 @@ pub const FUSE_KERNEL_MINOR_VERSION: u32 = 38;
 
 /// Minimum Minor version number supported. If client sends a minor
 /// number lesser than this, we don't support it.
-pub const FUSE_MIN_KERNEL_MINOR_VERSION: u32 = 27;
+pub const FUSE_MIN_KERNEL_MINOR_VERSION: u32 = 38;
 
 
 // Flags in Init Message
@@ -101,6 +101,17 @@ bitflags::bitflags! {
         const MTIME_NOW = FATTR_MTIME_NOW;
         const CTIME = FATTR_CTIME;
         const KILL_SUIDGID = FATTR_KILL_SUIDGID;
+    }
+}
+
+// setxattr flags
+/// Clear SGID when system.posix_acl_access is set
+const FUSE_SETXATTR_ACL_KILL_SGID: u32 = 1 << 0;
+
+bitflags::bitflags! {
+    pub struct FuseSetxattrFlags: u32 {
+        /// Clear SGID when system.posix_acl_access is set
+        const SETXATTR_ACL_KILL_SGID = FUSE_SETXATTR_ACL_KILL_SGID;
     }
 }
 
@@ -277,6 +288,7 @@ pub struct FuseOpenIn {
     pub open_flags: u32,
 }
 
+
 #[derive(Debug, Pod, Clone, Copy)]
 #[repr(C)]
 pub struct FuseOpenOut {
@@ -436,7 +448,20 @@ pub struct FuseReleaseIn {
     pub lock_owner: u64,
 }
 
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseSetxattrIn {
+    pub size: u32,
+    pub flags: u32,
+    pub setxattr_flags: u32,
+    pub padding: u32,
+}
 
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseInterruptIn {
+    pub unique: u64,
+}
 
 #[repr(C)]
 #[derive(Debug, Pod, Copy, Clone)]
@@ -444,4 +469,47 @@ pub struct FuseFsyncIn {
     pub fh: u64,
     pub fsync_flags: u32,
     pub padding: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseSetxattrInCompat {
+    pub size: u32,
+    pub flags: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseBatchForgetIn {
+    pub count: u32,
+    pub dummy: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseGetxattrIn {
+    pub size: u32,
+    pub padding: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseGetxattrOut {
+    pub size: u32,
+    pub padding: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseAccessIn {
+    pub mask: u32,
+    pub padding: u32,
+}
+
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseForgetOne {
+    pub nodeid: u64,
+    pub nlookup: u64,
 }

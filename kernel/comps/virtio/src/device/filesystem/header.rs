@@ -52,7 +52,7 @@ pub trait AnyFuseDevice{
     fn sendhp(&self, concat_req: &[u8], locked_hp_queue: &mut VirtQueue, readable_len: usize, writeable_start: usize);
     // Functions defined in Fuse
     fn init(&self);
-    fn handle_init(&self, init_out: FuseInitOut);
+    fn handle_init(&self, init_out: FuseInitOut) -> bool;
     fn readdir(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
     fn opendir(&self, nodeid: u64, flags: u32);
     fn mkdir(&self, nodeid: u64, mode: u32, mask: u32, name: &str);
@@ -94,6 +94,18 @@ pub trait AnyFuseDevice{
     fn release(&self, nodeid: u64, fh: u64, flags: u32, release_flags: u32, lock_owner: u64);
     fn releasedir(&self, nodeid: u64, fh: u64, flags: u32);
     fn fsync(&self, nodeid: u64, fh: u64, fsync_flags: u32);
+    
+    /// setxattr_flags is set as zero
+    fn setxattr(&self, nodeid: u64, name: &str, value: &[u8], flags: u32);
+    /// The needed size of buffer will be returned if out_buf_size = 0
+    fn getxattr(&self, nodeid: u64, name: &str, out_buf_size: u32);
+    /// The needed size of buffer will be returned if out_buf_size = 0
+    fn listxattr(&self, nodeid: u64, out_buf_size: u32);
+    fn removexattr(&self, nodeid: u64, name: &str);
+    fn access(&self, nodeid: u64, mask: u32);
+    
+    fn interrupt(&self);
+    fn batchforget(&self, forget_list: &[(u64, u64)]);
 }
 
 ///FuseDirent with the file name
@@ -151,7 +163,7 @@ pub fn fuse_pad_str(name: &str, repr_c: bool)-> Vec<u8>{
 }
 
 /// Map the opcode value to corresponding enum type
-pub fn to_opcode(val: u32) -> Result<FuseOpcode, Error>{
+pub fn as_opcode(val: u32) -> Result<FuseOpcode, Error>{
     match val {
         1 => Ok(FuseOpcode::FuseLookup),
         2 => Ok(FuseOpcode::FuseForget),
