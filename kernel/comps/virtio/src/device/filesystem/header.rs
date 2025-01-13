@@ -94,6 +94,7 @@ pub trait AnyFuseDevice{
     fn release(&self, nodeid: u64, fh: u64, flags: u32, release_flags: u32, lock_owner: u64);
     fn releasedir(&self, nodeid: u64, fh: u64, flags: u32);
     fn fsync(&self, nodeid: u64, fh: u64, fsync_flags: u32);
+    fn fsyncdir(&self, nodeid: u64, fh: u64, fsync_flags: u32);
     
     /// setxattr_flags is set as zero
     fn setxattr(&self, nodeid: u64, name: &str, value: &[u8], flags: u32);
