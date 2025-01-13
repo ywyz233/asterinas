@@ -91,6 +91,8 @@ pub trait AnyFuseDevice{
     fn link(&self, nodeid: u64, oldnodeid: u64, name: &str);
     fn statfs(&self, nodeid: u64);
     fn copyfilerange(&self, nodeid: u64, fh_in: u64, off_in: u64, nodeid_out: u64, fh_out: u64, off_out: u64, len: u64, flags: u64);
+    fn interrupt(&self);
+    fn batchforget(&self, forget_list: &[(u64, u64)]);
 }
 
 ///FuseDirent with the file name

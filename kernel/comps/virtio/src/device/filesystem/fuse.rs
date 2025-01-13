@@ -424,3 +424,23 @@ pub struct FuseCopyfilerangeIn {
     pub len: u64,
     pub flags: u64,
 }
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseInterruptIn {
+    pub unique: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseBatchForgetIn {
+    pub count: u32,
+    pub dummy: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseForgetOne {
+    pub nodeid: u64,
+    pub nlookup: u64,
+}
