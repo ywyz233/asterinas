@@ -1,5 +1,5 @@
 use ostd::{
-    early_print, mm::{VmReader, VmWriter}, Error, Pod
+    early_print, early_println, mm::{VmReader, VmWriter}, Error, Pod
 };
 use crate::{device::filesystem::fuse::*, queue::VirtQueue};
 use alloc::{
@@ -106,6 +106,9 @@ pub trait AnyFuseDevice{
     
     fn interrupt(&self);
     fn batchforget(&self, forget_list: &[(u64, u64)]);
+
+    fn create(&self, nodeid: u64, flags: u32, mode: u32, mask: u32, name: &str);
+    fn readdirplus(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
 }
 
 ///FuseDirent with the file name
@@ -114,9 +117,19 @@ pub struct FuseDirentWithName{
     pub name: Vec<u8>,
 }
 
+pub struct FuseDirentWithNamePlus{
+    pub dirent: FuseDirent,
+    pub name: Vec<u8>,
+    pub entry: FuseEntryOut,
+}
+
 ///Contain all directory entries for one directory
 pub struct FuseReaddirOut{
     pub dirents: Vec<FuseDirentWithName>,
+}
+
+pub struct FuseReaddirplusOut{
+    pub dirents: Vec<FuseDirentWithNamePlus>,
 }
 
 impl FuseReaddirOut{
@@ -148,6 +161,40 @@ impl FuseReaddirOut{
             len -= size_of::<FuseDirent>() as i32 + dirent.namelen as i32 + pad_len as i32;
         }
         FuseReaddirOut { dirents: dirents }
+    }
+}
+
+impl FuseReaddirplusOut{
+    /// Read all directory entries from the buffer
+    pub fn read_dirent(reader: &mut VmReader<'_, ostd::mm::Infallible>, out_header: FuseOutHeader) -> FuseReaddirplusOut{
+        let mut len  = out_header.len as i32 - size_of::<FuseOutHeader>() as i32;
+        let mut dirents: Vec<FuseDirentWithNamePlus> = Vec::new();
+
+        // For paddings between dirents
+        let mut padding: Vec<u8> = vec![0 as u8; 8];
+        while len > 0{
+            let entry = reader.read_val::<FuseEntryOut>().unwrap();
+            let dirent = reader.read_val::<FuseDirent>().unwrap();
+            let mut file_name: Vec<u8>;
+            
+            file_name = vec![0 as u8; dirent.namelen as usize];
+            let mut writer = VmWriter::from(file_name.as_mut_slice());
+            writer.write(reader);
+
+            let pad_len = (8 - (dirent.namelen & 0x7)) & 0x7; // pad to multiple of 8 bytes
+            let mut pad_writer = VmWriter::from(&mut padding[0..pad_len as usize]);
+            pad_writer.write(reader);
+
+
+            dirents.push(FuseDirentWithNamePlus{
+                entry: entry,
+                dirent: dirent,
+                name: file_name,
+            });
+            // early_print!("len: {:?} ,dirlen: {:?}, name_len: {:?}\n", len, size_of::<FuseDirent>() as u32 + dirent.namelen, dirent.namelen);
+            len -= size_of::<FuseEntryOut>() as i32 + size_of::<FuseDirent>() as i32 + dirent.namelen as i32 + pad_len as i32;
+        }
+        FuseReaddirplusOut { dirents: dirents }
     }
 }
 

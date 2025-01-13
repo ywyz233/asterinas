@@ -513,3 +513,12 @@ pub struct FuseForgetOne {
     pub nodeid: u64,
     pub nlookup: u64,
 }
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseCreateIn {
+    pub flags: u32,
+    pub mode: u32,
+    pub umask: u32,
+    pub open_flags: u32,
+}
