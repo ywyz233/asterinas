@@ -541,6 +541,7 @@ impl AnyFuseDevice for FileSystemDevice{
         let readable_len = size_of::<FuseInHeader>() + size_of::<FuseMknodIn>() + prepared_name.len();
         self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
     }
+
     fn getattr(&self, nodeid: u64, flags: u32, fh: u64){
         let mut request_queue = self.request_queues[0].disable_irq().lock();
         let headerin = FuseInHeader{
@@ -1197,6 +1198,107 @@ impl AnyFuseDevice for FileSystemDevice{
         let readable_len = header_len;
         self.send(concat_req.as_slice(), 0, &mut (*request_queue), readable_len, readable_len);
     }
+
+    fn flush(&self, nodeid: u64, fh: u64, lock_owner: u64){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let header_len = size_of::<FuseInHeader>() + size_of::<FuseFlushIn>();
+        let headerin = FuseInHeader{
+            len: header_len as u32,
+            opcode: FuseOpcode::FuseFlush as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let flushin = FuseFlushIn {
+            fh: fh,
+            unused: 0,
+            padding: 0,
+            lock_owner: lock_owner,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let flushin_bytes = flushin.as_bytes();
+        
+        let concat_req = [headerin_bytes, flushin_bytes, &headerout_buffer].concat();
+
+        //Send msg
+        let readable_len = header_len;
+        self.send(concat_req.as_slice(), 0, &mut request_queue, readable_len, readable_len);
+    }
+    
+    fn fallocate(&self, nodeid: u64, fh: u64, offset: u64, len: u64, mode: u32){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let header_len = size_of::<FuseInHeader>() + size_of::<FuseFallocateIn>();
+        let headerin = FuseInHeader{
+            len: header_len as u32,
+            opcode: FuseOpcode::FuseFallocate as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let fallocatein = FuseFallocateIn {
+            fh: fh,
+            offset: offset,
+            length: len,
+            mode: mode,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let fallocatein_bytes = fallocatein.as_bytes();
+        
+        let concat_req = [headerin_bytes, fallocatein_bytes, &headerout_buffer].concat();
+
+        //Send msg
+        let readable_len = header_len;
+        self.send(concat_req.as_slice(), 0, &mut request_queue, readable_len, readable_len);
+    }
+
+    fn lseek(&self, nodeid: u64, fh: u64, offset: u64, whence: u32){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let header_len = size_of::<FuseInHeader>() + size_of::<FuseLseekIn>();
+        let headerin = FuseInHeader{
+            len: header_len as u32,
+            opcode: FuseOpcode::FuseLseek as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let lseekin = FuseLseekIn {
+            fh: fh,
+            offset: offset,
+            whence: whence,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let lseekout_buffer = [0u8; size_of::<FuseLseekOut>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let lseekin_bytes = lseekin.as_bytes();
+        
+        let concat_req = [headerin_bytes, lseekin_bytes, &headerout_buffer, &lseekout_buffer].concat();
+
+        //Send msg
+        let readable_len = header_len;
+        self.send(concat_req.as_slice(), 0, &mut request_queue, readable_len, readable_len);
+    }
 }
 
 
@@ -1496,6 +1598,22 @@ impl FileSystemDevice{
                 let headerout = reader.read_val::<FuseOutHeader>().unwrap();
                 early_print!("Access response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
             },
+            FuseOpcode::FuseFlush => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Flush response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+            },
+            FuseOpcode::FuseFallocate => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Fallocate response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+            },
+            FuseOpcode::FuseLseek => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Lseek response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+                if headerout.len > size_of::<FuseOutHeader>() as u32 {
+                    let lseekout = reader.read_val::<FuseLseekOut>().unwrap();
+                    early_print!("Lseek response received: offset={:?}\n", lseekout.offset);
+                }
+            }
             _ => {
                 let headerout = reader.read_val::<FuseOutHeader>().unwrap();
                 early_print!("New response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
@@ -1545,15 +1663,13 @@ pub fn test_device(device: &FileSystemDevice){
 
 
     match test_counter{
-        
-
-        // test fsync
-        1 => device.opendir(1,0),
-        2 => device.readdir(1,0,0,128),
-        3 => device.lookup(1, "testh"),
-        4 => device.open(2, 2),
-        5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
-        6 => device.fsync(2, 1, 3),
+        // // test fsync
+        // 1 => device.opendir(1,0),
+        // 2 => device.readdir(1,0,0,128),
+        // 3 => device.lookup(1, "testh"),
+        // 4 => device.open(2, 2),
+        // 5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
+        // 6 => device.fsync(2, 1, 3),
         
 
         // // test releasedir
@@ -1567,9 +1683,6 @@ pub fn test_device(device: &FileSystemDevice){
         // // 3 => device.lookup(1, "newdir"),
         
 
-
-
-
         // // test release
         // 1 => device.opendir(1,0),
         // 2 => device.readdir(1,0,0,128),
@@ -1580,12 +1693,15 @@ pub fn test_device(device: &FileSystemDevice){
         // 6 => device.lookup(1, "testg"),
         // 7 => device.open(3, 2),
         // 8 => device.write(2, 1, 0, "bbbbbbbbbb\n"),
+
+
+        // // copyfilerange function test
+        // 1 => device.opendir(1,0),
+        // 2 => device.readdir(1,0,0,128),
+        // 3 => device.lookup(1, "testh"),
         
 
 
-        // 1 => device.opendir(1,0),
-        // 2 => device.readdir(1,0,0,128),
-        // 3 => device.lookup(1, "testl"),
         1 => device.opendir(1,0),
         2 => device.readdir(1,0,0,128),
         3 => device.lookup(1, "testh"),
@@ -1594,6 +1710,10 @@ pub fn test_device(device: &FileSystemDevice){
         6 => device.listxattr(2, 255),
         7 => device.removexattr(2, "guest_field"),
         8 => device.access(2, 1),
+        9 => device.open(2, 2),
+        // 10 => device.flush(2, 1, 0),
+        10 => device.lseek(2, 1, 2, 1),
+        11 => device.lseek(2, 1, 2, 1),
         // 3 => device.mkdir(1, 0o755, 0o777, "MkdirTest"),
         // 3 => device.lookup(1, "testh"),
         // 4 => device.open(2, 2),
@@ -1619,10 +1739,7 @@ pub fn test_device(device: &FileSystemDevice){
         // 4 => device.symlink(1, "test_guest", "testh"),
         // 4 => device.readlink(2, 128),
 
-        // copyfilerange function test
-        // 1 => device.opendir(1,0),
-        // 2 => device.readdir(1,0,0,128),
-        // 3 => device.lookup(1, "testh"),
+
 
         // 4 => device.open(2, 2),
         // 5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
