@@ -32,7 +32,7 @@ pub struct FileSystemDevice{
     hiprio_buffer: DmaStream,
     // notification_buffer: Option<DmaStream>,
     request_buffers: Vec<DmaStream>,
-    options: AtomicU64,
+    options: Arc<AtomicU64>,
 }
 
 
@@ -66,6 +66,10 @@ impl AnyFuseDevice for FileSystemDevice{
 
     fn init(&self){
         let mut request_queue = self.request_queues[0].disable_irq().lock();
+        let supported_options = 
+            FuseInitFlags::FUSE_INIT_EXT.bits() as u64 |
+            FuseInitFlags::FUSE_SETXATTR_EXT.bits() as u64;
+        self.options.store(supported_options, Ordering::Relaxed);
 
         let headerin = FuseInHeader{
             len: (size_of::<FuseInitIn>() as u32 + size_of::<FuseInHeader>() as u32),
@@ -82,8 +86,8 @@ impl AnyFuseDevice for FileSystemDevice{
             major: FUSE_KERNEL_VERSION,
             minor: FUSE_KERNEL_MINOR_VERSION,
             max_readahead: 0,
-            flags: FuseInitFlags::FUSE_INIT_EXT.bits() as u32,
-            flags2: 0,
+            flags: supported_options as u32,
+            flags2: (supported_options >> 32) as u32,
             unused: [0u32; 11]
         };
         let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
@@ -109,11 +113,23 @@ impl AnyFuseDevice for FileSystemDevice{
         // }
     }
 
-    fn handle_init(&self, init_out: FuseInitOut){
+    fn handle_init(&self, init_out: FuseInitOut) -> bool{
+        if init_out.major != FUSE_KERNEL_VERSION {
+            early_print!("[VIRTIOFSD]: Major Version {:?} is not supported, supported major version={:?}\n", 
+                init_out.major, FUSE_KERNEL_VERSION);
+            return false;
+        }
+
+        if init_out.minor > FUSE_KERNEL_MINOR_VERSION && init_out.minor < FUSE_MIN_KERNEL_MINOR_VERSION {
+            early_print!("[VIRTIOFSD]: Minor Version {:?} is not supported, supported={:?}-{:?}\n", 
+                init_out.minor, FUSE_MIN_KERNEL_MINOR_VERSION, FUSE_KERNEL_MINOR_VERSION);
+            return false;
+        }
         let self_option = self.options.load(Ordering::Relaxed);
         let server_options = ((init_out.flags2 as u64) << 32) | (init_out.flags as u64);
         let options = server_options & self_option;
         self.options.store(options, Ordering::Relaxed);
+        return true;
     }
 
     fn opendir(&self, nodeid: u64, flags: u32){
@@ -823,6 +839,196 @@ impl AnyFuseDevice for FileSystemDevice{
         let writeable_start = header_len + prepared_concat_name_bytes.len();
         self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, writeable_start);
     }
+
+    fn setxattr(&self, nodeid: u64, name: &str, value: &[u8], flags: u32){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let attr_len = name.len() + value.len() + 1; // With '\0' between name and value
+        let pad_size = (8 - (attr_len & 0x7)) & 0x7;
+
+        let options = FuseInitFlags::from_bits_truncate(self.options.load(Ordering::Relaxed));
+        let setxattr_in= if options.contains(FuseInitFlags::FUSE_SETXATTR_EXT) {
+            let setxattr_in = FuseSetxattrIn {
+                size: value.len() as u32,
+                flags: flags,
+                setxattr_flags: 0,
+                padding: 0
+            };
+            Vec::from(setxattr_in.as_bytes())
+        } else {
+            let setxattr_in = FuseSetxattrInCompat {
+                size: value.len() as u32,
+                flags: flags,
+            };
+            Vec::from(setxattr_in.as_bytes())
+        };
+
+        let header_len = size_of::<FuseInHeader>() + setxattr_in.len();
+
+        let headerin = FuseInHeader{
+            len: header_len as u32 + attr_len as u32,
+            opcode: FuseOpcode::FuseSetxattr as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+
+        let pad_buffer = vec![0u8; pad_size];
+        let prepared_attr = [name.as_bytes(), "\0".as_bytes(), value, pad_buffer.as_slice()].concat();
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let setxattr_in_bytes = setxattr_in.as_slice();
+        let prepared_attr_bytes = prepared_attr.as_slice();
+
+        let concat_req = [headerin_bytes, setxattr_in_bytes, prepared_attr_bytes, &headerout_buffer].concat();
+
+        //Send msg
+        let readable_len = header_len + attr_len;
+        let writeable_start = header_len + prepared_attr.len();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, writeable_start);
+    }
+
+    fn getxattr(&self, nodeid: u64, name: &str, out_buf_size: u32){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let header_len = size_of::<FuseGetxattrIn>() + size_of::<FuseInHeader>();
+        let headerin = FuseInHeader{
+            len: header_len as u32 + name.len() as u32 + 1,
+            opcode: FuseOpcode::FuseGetxattr as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let getxattr_in = FuseGetxattrIn{
+            size: out_buf_size,
+            padding: 0,
+        };
+        let prepared_name = fuse_pad_str(name, true);
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let dataout_buffer = if out_buf_size == 0 {
+            vec![0u8; size_of::<FuseGetxattrOut>()]
+        } else {
+            vec![0u8; out_buf_size as usize]
+        };
+
+        let headerin_bytes = headerin.as_bytes();
+        let getxattr_in_bytes = getxattr_in.as_bytes();
+        let prepared_name_bytes = prepared_name.as_slice();
+        let dataout_bytes = dataout_buffer.as_slice();
+
+        let concat_req = [headerin_bytes, getxattr_in_bytes, prepared_name_bytes, &headerout_buffer, dataout_bytes].concat();
+
+        //Send msg
+        let readable_len = header_len + name.len() + 1;
+        let writeable_start = header_len + prepared_name.len();
+        self.send(concat_req.as_slice(), 0, &mut (*request_queue), readable_len, writeable_start);
+    }
+
+    fn listxattr(&self, nodeid: u64, out_buf_size: u32){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let header_len = size_of::<FuseGetxattrIn>() + size_of::<FuseInHeader>();
+        let headerin = FuseInHeader{
+            len: header_len as u32,
+            opcode: FuseOpcode::FuseListxattr as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let getxattr_in = FuseGetxattrIn{
+            size: out_buf_size,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let dataout_buffer = if out_buf_size == 0 {
+            vec![0u8; size_of::<FuseGetxattrOut>()]
+        } else {
+            vec![0u8; out_buf_size as usize]
+        };
+
+        let headerin_bytes = headerin.as_bytes();
+        let getxattr_in_bytes = getxattr_in.as_bytes();
+        let dataout_bytes = dataout_buffer.as_slice();
+
+        let concat_req = [headerin_bytes, getxattr_in_bytes, &headerout_buffer, dataout_bytes].concat();
+
+        //Send msg
+        let readable_len = header_len;
+        self.send(concat_req.as_slice(), 0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+    fn removexattr(&self, nodeid: u64, name: &str){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let header_len = size_of::<FuseInHeader>();
+        let headerin = FuseInHeader{
+            len: header_len as u32 + name.len() as u32 + 1,
+            opcode: FuseOpcode::FuseRemovexattr as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let prepared_name = fuse_pad_str(name, true);
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let prepared_name_bytes = prepared_name.as_slice();
+        
+        let concat_req = [headerin_bytes, prepared_name_bytes, &headerout_buffer].concat();
+
+        //Send msg
+        let readable_len = header_len + name.len() + 1;
+        let writeable_start = header_len + prepared_name.len();
+        self.send(concat_req.as_slice(), 0, &mut (*request_queue), readable_len, writeable_start);
+    }
+
+    fn access(&self, nodeid: u64, mask: u32){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let header_len = size_of::<FuseInHeader>() + size_of::<FuseAccessIn>();
+        let headerin = FuseInHeader{
+            len: header_len as u32,
+            opcode: FuseOpcode::FuseAccess as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let accessin = FuseAccessIn {
+            mask: mask,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseAccessIn>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let accessin_bytes = accessin.as_bytes();
+        
+        let concat_req = [headerin_bytes, accessin_bytes, &headerout_buffer].concat();
+
+        //Send msg
+        let readable_len = header_len;
+        self.send(concat_req.as_slice(), 0, &mut (*request_queue), readable_len, readable_len);
+    }
 }
 
 
@@ -874,7 +1080,7 @@ impl FileSystemDevice{
             request_queues: request_queues,
             hiprio_buffer: hiprio_buffer,
             request_buffers: request_buffers,
-            options: AtomicU64::new(FuseInitFlags::empty().bits()),
+            options: Arc::new(AtomicU64::new(FuseInitFlags::empty().bits())),
         });
         let handle_request = {
             let device = device.clone();
@@ -891,8 +1097,8 @@ impl FileSystemDevice{
         transport.finish_init();
         drop(transport);
         
-        // device.init();
-        test_device(&device);
+        device.init();
+        // test_device(&device);
 
         Ok(())
     }
@@ -905,15 +1111,19 @@ impl FileSystemDevice{
         self.request_buffers[0].sync(0..len as usize).unwrap();
         let mut reader = self.request_buffers[0].reader().unwrap();
         let headerin = reader.read_val::<FuseInHeader>().unwrap();
-        // Remove Data_in
-        let trash_len = headerin.len as usize - size_of::<FuseInHeader>();
-        let pad_trash_len = trash_len + ((8 - (trash_len & 0x7)) & 0x7); //pad to multiple of 8 bytes
-        let mut trash_vec = vec![0u8; pad_trash_len];
-        let mut trash_writer = VmWriter::from(trash_vec.as_mut_slice());
-        trash_writer.write(&mut reader);
-        match to_opcode(headerin.opcode).unwrap() {
+        // Remove Data_in except for getxattr operation
+        if headerin.opcode != FuseOpcode::FuseGetxattr as u32 && headerin.opcode != FuseOpcode::FuseListxattr as u32 {
+            let trash_len = headerin.len as usize - size_of::<FuseInHeader>();
+            let pad_trash_len = trash_len + ((8 - (trash_len & 0x7)) & 0x7); //pad to multiple of 8 bytes
+            let mut trash_vec = vec![0u8; pad_trash_len];
+            let mut trash_writer = VmWriter::from(trash_vec.as_mut_slice());
+            trash_writer.write(&mut reader);
+        }
+        
+        match as_opcode(headerin.opcode).unwrap() {
             FuseOpcode::FuseInit => {
-                let _ = reader.read_val::<FuseOutHeader>().unwrap();
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Readdir response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
                 let dataout = reader.read_val::<FuseInitOut>().unwrap();
                 early_print!("Received Init Msg\n");
                 early_print!("major:{:?}\n", dataout.major);
@@ -1050,10 +1260,63 @@ impl FileSystemDevice{
             FuseOpcode::FuseCopyFileRange => {
                 let headerout = reader.read_val::<FuseOutHeader>().unwrap();
                 early_print!("CopyFileRange response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
-                if headerout.len > size_of::<FuseOutHeader> as u32 {
+                if headerout.len > size_of::<FuseOutHeader>() as u32 {
                     let writeout = reader.read_val::<FuseWriteOut>().unwrap();
                     early_print!("CopyFileRange response received: size={:?}\n", writeout.size);
                 }
+            },
+            FuseOpcode::FuseSetxattr => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Setxattr response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+            },
+            FuseOpcode::FuseGetxattr => {
+                let datain = reader.read_val::<FuseGetxattrIn>().unwrap();
+                let trash_len = headerin.len as usize - size_of::<FuseInHeader>() - size_of::<FuseGetxattrIn>();
+                let pad_trash_len = trash_len + ((8 - (trash_len & 0x7)) & 0x7); //pad to multiple of 8 bytes
+                let mut trash_vec = vec![0u8; pad_trash_len];
+                let mut trash_writer = VmWriter::from(trash_vec.as_mut_slice());
+                trash_writer.write(&mut reader);
+
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Getxattr response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+                if headerout.len > size_of::<FuseOutHeader>() as u32 {
+                    if datain.size == 0 {
+                        let dataout = reader.read_val::<FuseGetxattrOut>().unwrap();
+                        early_print!("Getxattr response received: size:{:?}\n", dataout.size);
+                    } else {
+                        let value_size = headerout.len as usize - size_of::<FuseOutHeader>();
+                        let mut value_buffer = vec![0u8; value_size];
+                        let mut writer = VmWriter::from(value_buffer.as_mut_slice());
+                        writer.write(&mut reader);
+                        early_print!("Getxattr response received: val:{:?}\n", value_buffer.as_slice());
+                    }
+                }
+            },
+            FuseOpcode::FuseListxattr => {
+                let datain = reader.read_val::<FuseGetxattrIn>().unwrap();
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Listxattr response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+
+                if headerout.len > size_of::<FuseOutHeader>() as u32 {
+                    if datain.size == 0 {
+                        let dataout = reader.read_val::<FuseGetxattrOut>().unwrap();
+                        early_print!("Listxattr response received: size={:?}\n", dataout.size);
+                    } else {
+                        let value_size = headerout.len as usize - size_of::<FuseOutHeader>();
+                        let mut value_buffer = vec![0u8; value_size];
+                        let mut writer = VmWriter::from(value_buffer.as_mut_slice());
+                        writer.write(&mut reader);
+                        early_print!("Listxattr response received: ={:?}\n", value_buffer.as_slice());
+                    }
+                }
+            },
+            FuseOpcode::FuseRemovexattr => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Removexattr response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+            },
+            FuseOpcode::FuseAccess => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Access response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
             }
             _ => {
             }
@@ -1064,7 +1327,7 @@ impl FileSystemDevice{
 }
 
 
-static TEST_COUNTER: RwLock<u32> = RwLock::new(13);
+static TEST_COUNTER: RwLock<u32> = RwLock::new(0);
 pub fn test_device(device: &FileSystemDevice){
     let test_counter = {
         let mut test_counter = TEST_COUNTER.write();
@@ -1074,9 +1337,14 @@ pub fn test_device(device: &FileSystemDevice){
 
 
     match test_counter{
-        // 1 => device.opendir(1,0),
-        // 2 => device.readdir(1,0,0,128),
-        // 3 => device.lookup(1, "testl"),
+        1 => device.opendir(1,0),
+        2 => device.readdir(1,0,0,128),
+        3 => device.lookup(1, "testh"),
+        4 => device.setxattr(2, "guset_field", &[63,31], 0),
+        5 => device.getxattr(2, "guset_field", 3),
+        6 => device.listxattr(2, 255),
+        7 => device.removexattr(2, "guest_field"),
+        8 => device.access(2, 1),
         // 3 => device.mkdir(1, 0o755, 0o777, "MkdirTest"),
         // 3 => device.lookup(1, "testh"),
         // 4 => device.open(2, 2),
@@ -1102,50 +1370,6 @@ pub fn test_device(device: &FileSystemDevice){
         // 4 => device.symlink(1, "test_guest", "testh"),
         // 4 => device.readlink(2, 128),
 
-        // copyfilerange function test
-        1 => device.opendir(1,0),
-        2 => device.readdir(1,0,0,128),
-        3 => device.lookup(1, "testh"),
-
-        4 => device.open(2, 2),
-        5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
-        6 => device.read(2, 1, 0, 128),
-        // 7 => device.mknod(1, 0o755, 0o777, "dwx"),
-        8 => device.lookup(1, "dwxs"), // dwxs: nodeid 2
-        9 => device.lookup(1, "dwxnews"), // dwxnews: nodeid 3
-        10 => device.lookup(2, "dwx"), // dwx: nodeid 4
-        11 => device.open(4, 2), // dwx: fh 0
-        12 => device.write(4, 0, 0, "Hello from Guest!!\n"),
-        13 => device.rename2(2, 3, 2, "dwx", "dwxnew"),
-        5 => device.lookup(1, "testg"),
-        6 => device.open(3, 2),
-        7 => device.copyfilerange(2, 1, 0, 3, 2, 0, 6, 0),
-
-
-
-
-
-        // 3 => device.statfs(1),
-        // 4 => device.mkdir(1, 0o755, 0o777, "newdir"),
-        // 5 => device.readdir(1,0,0,128),
-        // 6 => device.statfs(1),
-
-
-        // 3 => device.lookup(1, "testh"),
-        // 4 => device.link(1,2,"newtesth"),
-
-        // 3 => device.unlink(1, "testh"),
-        // 4 => device.readdir(1,0,0,128),
-        // // 3 => device.mkdir(1, 0o755, 0o777, "MkdirTest"),
-        // 4 => device.open(2, 2),
-        // 5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
-        // 6 => device.read(2, 1, 0, 128),
-
-
-        // // 7 => device.mkdir(1, 0o755, 0o777, "newtest"),
-        // 7 => device.readdir(1,0,0,128),
-        // 8 => device.rmdir(1,"hht"),
-        // 9 => device.readdir(1,0,0,128),
         _ => ()
     };
 }
