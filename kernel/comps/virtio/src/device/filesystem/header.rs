@@ -100,6 +100,9 @@ pub trait AnyFuseDevice{
     fn listxattr(&self, nodeid: u64, out_buf_size: u32);
     fn removexattr(&self, nodeid: u64, name: &str);
     fn access(&self, nodeid: u64, mask: u32);
+    
+    fn interrupt(&self);
+    fn batchforget(&self, forget_list: &[(u64, u64)]);
 }
 
 ///FuseDirent with the file name

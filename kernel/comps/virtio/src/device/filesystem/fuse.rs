@@ -288,6 +288,7 @@ pub struct FuseOpenIn {
     pub open_flags: u32,
 }
 
+
 #[derive(Debug, Pod, Clone, Copy)]
 #[repr(C)]
 pub struct FuseOpenOut {
@@ -447,9 +448,23 @@ pub struct FuseSetxattrIn {
 
 #[repr(C)]
 #[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseInterruptIn {
+    pub unique: u64,
+}
+
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
 pub struct FuseSetxattrInCompat {
     pub size: u32,
     pub flags: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseBatchForgetIn {
+    pub count: u32,
+    pub dummy: u32,
 }
 
 #[repr(C)]
@@ -471,4 +486,12 @@ pub struct FuseGetxattrOut {
 pub struct FuseAccessIn {
     pub mask: u32,
     pub padding: u32,
+}
+
+
+#[repr(C)]
+#[derive(Debug, Pod, Copy, Clone)]
+pub struct FuseForgetOne {
+    pub nodeid: u64,
+    pub nlookup: u64,
 }

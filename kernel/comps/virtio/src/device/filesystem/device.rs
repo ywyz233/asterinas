@@ -840,6 +840,7 @@ impl AnyFuseDevice for FileSystemDevice{
         self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, writeable_start);
     }
 
+
     fn setxattr(&self, nodeid: u64, name: &str, value: &[u8], flags: u32){
         let mut request_queue = self.request_queues[0].disable_irq().lock();
 
@@ -876,7 +877,6 @@ impl AnyFuseDevice for FileSystemDevice{
             total_extlen: 0,
             padding: 0,
         };
-
         let pad_buffer = vec![0u8; pad_size];
         let prepared_attr = [name.as_bytes(), "\0".as_bytes(), value, pad_buffer.as_slice()].concat();
         let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
@@ -892,6 +892,38 @@ impl AnyFuseDevice for FileSystemDevice{
         let writeable_start = header_len + prepared_attr.len();
         self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, writeable_start);
     }
+
+
+    fn interrupt(&self){
+        let mut hp_queue = self.hiprio_queue.disable_irq().lock();
+
+        let interruptin = FuseInterruptIn{
+            unique: 0,
+        };
+
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseInterruptIn>() as u32),
+            opcode: FuseOpcode::FuseInterrupt as u32,
+            unique: 0,
+            nodeid: 0,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let interruptin_bytes = interruptin.as_bytes();
+        let headerin_bytes = headerin.as_bytes();
+        let headerout_buffer = [0u8; 4];
+        let concat_req = [headerin_bytes, interruptin_bytes, &headerout_buffer].concat();
+
+        // Send msg
+        let header_len = size_of::<FuseInHeader>() + size_of::<FuseInterruptIn>();
+        let readable_len = header_len;
+        // self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+        self.sendhp(concat_req.as_slice(), &mut (*hp_queue), readable_len, readable_len);
+    }  
+    
 
     fn getxattr(&self, nodeid: u64, name: &str, out_buf_size: u32){
         let mut request_queue = self.request_queues[0].disable_irq().lock();
@@ -999,6 +1031,48 @@ impl AnyFuseDevice for FileSystemDevice{
         self.send(concat_req.as_slice(), 0, &mut (*request_queue), readable_len, writeable_start);
     }
 
+
+    fn batchforget(&self, forget_list: &[(u64, u64)]){
+        let mut hp_queue = self.hiprio_queue.disable_irq().lock();
+
+        let batchforgetin = FuseBatchForgetIn{
+            count: forget_list.len() as u32,
+            dummy: 0,
+        };
+
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseBatchForgetIn>() as u32 + (forget_list.len() * size_of::<FuseForgetOne>()) as u32),
+            opcode: FuseOpcode::FuseBatchForget as u32,
+            unique: 0,
+            nodeid: 0,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let batchforgetin_bytes = batchforgetin.as_bytes();
+        let headerin_bytes = headerin.as_bytes();
+
+        let mut forget_one_bytes = Vec::new();
+        for &(nodeid, nlookup) in forget_list {
+            let forget_one = FuseForgetOne {
+                nodeid,
+                nlookup,
+            };
+            forget_one_bytes.extend_from_slice(forget_one.as_bytes());
+        }
+
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let concat_req = [headerin_bytes, batchforgetin_bytes, forget_one_bytes.as_slice(), &headerout_buffer].concat();
+
+        // Send msg
+        let header_len = headerin.len as usize;
+        let readable_len = header_len;
+        // self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+        self.sendhp(concat_req.as_slice(), &mut (*hp_queue), readable_len, readable_len);
+    }  
+    
     fn access(&self, nodeid: u64, mask: u32){
         let mut request_queue = self.request_queues[0].disable_irq().lock();
 
@@ -1082,14 +1156,24 @@ impl FileSystemDevice{
             request_buffers: request_buffers,
             options: Arc::new(AtomicU64::new(FuseInitFlags::empty().bits())),
         });
+
         let handle_request = {
             let device = device.clone();
             move |_: &TrapFrame| device.handle_recv_irq()
         };
+
+        let handle_request_hp = {
+            let device = device.clone();
+            move |_: &TrapFrame| device.handle_recv_irq_hp()
+        };
+
         let config_space_change = |_: &TrapFrame| early_print!("Config Changed\n");
         let mut transport = device.transport.disable_irq().lock();
         transport
             .register_queue_callback(REQUEST_QUEUE_BASE_INDEX + 0, Box::new(handle_request), false)
+            .unwrap();
+        transport
+            .register_queue_callback(HIPRIO_QUEUE_INDEX, Box::new(handle_request_hp), false)
             .unwrap();
         transport
             .register_cfg_callback(Box::new(config_space_change))
@@ -1317,12 +1401,40 @@ impl FileSystemDevice{
             FuseOpcode::FuseAccess => {
                 let headerout = reader.read_val::<FuseOutHeader>().unwrap();
                 early_print!("Access response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
-            }
+            },
             _ => {
             }
         };
         drop(request_queue);
         test_device(&self);
+    }
+
+    fn handle_recv_irq_hp(&self){
+        let mut hp_queue = self.hiprio_queue.disable_irq().lock();
+        let Ok((_, len)) = hp_queue.pop_used() else {
+            return;
+        };
+        self.hiprio_buffer.sync(0..len as usize).unwrap();
+        let mut reader = self.hiprio_buffer.reader().unwrap();
+        let headerin = reader.read_val::<FuseInHeader>().unwrap();
+        // Remove Data_in
+        let trash_len = headerin.len as usize - size_of::<FuseInHeader>();
+        let pad_trash_len = trash_len + ((8 - (trash_len & 0x7)) & 0x7); //pad to multiple of 8 bytes
+        let mut trash_vec = vec![0u8; pad_trash_len];
+        let mut trash_writer = VmWriter::from(trash_vec.as_mut_slice());
+        trash_writer.write(&mut reader);
+        match as_opcode(headerin.opcode).unwrap() {
+            FuseOpcode::FuseInterrupt => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("Interrupt response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+            },
+            FuseOpcode::FuseBatchForget => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                early_print!("BatchForget response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+            },
+            _ => {
+            }
+        }
     }
 }
 
