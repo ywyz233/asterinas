@@ -1060,6 +1060,8 @@ impl AnyFuseDevice for FileSystemDevice{
 
     }
 
+    
+
     fn listxattr(&self, nodeid: u64, out_buf_size: u32){
         let mut request_queue = self.request_queues[0].disable_irq().lock();
 
@@ -1298,6 +1300,109 @@ impl AnyFuseDevice for FileSystemDevice{
         //Send msg
         let readable_len = header_len;
         self.send(concat_req.as_slice(), 0, &mut request_queue, readable_len, readable_len);
+    }
+    fn create(&self, nodeid: u64, flags: u32, mode: u32, umask: u32, name: &str){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let createin = FuseCreateIn {
+            flags: flags,
+            mode: mode,
+            umask: umask,
+            open_flags: 0,
+        };
+        let prepared_name = fuse_pad_str(name, true);
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseCreateIn>() as u32 + name.len() as u32 + 1),
+            opcode: FuseOpcode::FuseCreate as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let entryout_buffer = [0u8; size_of::<FuseEntryOut>()];
+        let openout_buffer = [0u8; size_of::<FuseOpenOut>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let createin_bytes = createin.as_bytes();
+        let prepared_name_bytes = prepared_name.as_slice(); 
+        let concat_req = [headerin_bytes, createin_bytes, prepared_name_bytes, &headerout_buffer, &entryout_buffer, &openout_buffer].concat();
+        
+        //Send msg
+        let readable_len = size_of::<FuseInHeader>() + size_of::<FuseCreateIn>() + prepared_name.len();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+    fn readdirplus(&self, nodeid: u64, fh: u64, offset: u64, size: u32){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+        
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseReadIn>() as u32 + size_of::<FuseInHeader>() as u32),
+            opcode: FuseOpcode::FuseReaddirplus as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let readin = FuseReadIn {
+            fh: fh,
+            offset: offset,
+            size: size,
+            read_flags: 0,
+            lock_owner: 0,
+            flags: 0,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        let readout_buffer = vec![0u8; size as usize];
+        
+        let headerin_bytes = headerin.as_bytes();
+        let readin_bytes = readin.as_bytes();
+        let concat_req = [headerin_bytes, readin_bytes, &headerout_buffer, &readout_buffer].concat();
+
+        // Send msg
+        let readable_len = size_of::<FuseInHeader>() + size_of::<FuseReadIn>();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+    fn fsyncdir(&self, nodeid: u64, fh: u64, fsync_flags: u32){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let fsyncin = FuseFsyncIn {
+            fh: fh,
+            fsync_flags: fsync_flags,
+            padding: 0,
+        };
+        // let prepared_name = fuse_pad_str(name, true);
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseFsyncIn>() as u32 ),
+            opcode: FuseOpcode::FuseFsyncdir as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+
+        // let entryout_buffer = [0u8; size_of::<FuseEntryOut>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let fsyncin_bytes = fsyncin.as_bytes();
+        // let prepared_name_bytes = prepared_name.as_slice(); 
+        let concat_req = [headerin_bytes, fsyncin_bytes, &headerout_buffer].concat();
+        
+        //Send msg
+        let readable_len = size_of::<FuseInHeader>() + size_of::<FuseFsyncIn>();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
     }
 }
 
@@ -1613,7 +1718,31 @@ impl FileSystemDevice{
                     let lseekout = reader.read_val::<FuseLseekOut>().unwrap();
                     early_print!("Lseek response received: offset={:?}\n", lseekout.offset);
                 }
-            }
+            },
+            FuseOpcode::FuseCreate => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                let entryout = reader.read_val::<FuseEntryOut>().unwrap();
+                let openout = reader.read_val::<FuseOpenOut>().unwrap();
+                early_print!("Create response headerout received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+                early_print!("Create response entryout received: nodeid={:?}, generation={:?}, entry_valid={:?}, attr_valid={:?}\n", 
+                    entryout.nodeid, entryout.generation, entryout.entry_valid, entryout.attr_valid);
+                early_print!("Create response openout received: fh={:?}, open_flags={:?}, backing_id={:?}\n", 
+                    openout.fh, openout.open_flags, openout.backing_id);
+            },
+            FuseOpcode::FuseReaddirplus => {
+                let headerout = reader.read_val::<FuseOutHeader>().unwrap();
+                let readdir_out = FuseReaddirplusOut::read_dirent(&mut reader, headerout);
+                early_print!("Readdirplus response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
+                for dirent_name in readdir_out.dirents{
+                    let entry = dirent_name.entry;
+                    let dirent = dirent_name.dirent;
+                    let name = String::from_utf8(dirent_name.name).unwrap();
+                    early_print!("Readdir entry response received: nodeid={:?}, generation={:?}, entry_valid={:?}, attr_valid={:?}\n", 
+                        entry.nodeid, entry.generation, entry.entry_valid, entry.attr_valid);
+                    early_print!("Readdir dirent response received: inode={:?}, off={:?}, namelen={:?}, type={:?}, filename={:?}\n", 
+                        dirent.ino, dirent.off, dirent.namelen, dirent.type_, name);
+                }
+            },
             _ => {
                 let headerout = reader.read_val::<FuseOutHeader>().unwrap();
                 early_print!("New response received: len={:?}, error={:?}\n", headerout.len, headerout.error);
@@ -1653,7 +1782,7 @@ impl FileSystemDevice{
 }
 
 
-static TEST_COUNTER: RwLock<u32> = RwLock::new(0);
+static TEST_COUNTER: RwLock<u32> = RwLock::new(14);
 pub fn test_device(device: &FileSystemDevice){
     let test_counter = {
         let mut test_counter = TEST_COUNTER.write();
@@ -1663,6 +1792,13 @@ pub fn test_device(device: &FileSystemDevice){
 
 
     match test_counter{
+        // test fsyncdir
+        1 => device.opendir(1,0),
+        2 => device.readdir(1,0,0,128),
+        3 => device.lookup(1, "newdir"),
+        4 => device.opendir(2, 0),
+        5 => device.fsyncdir(2, 1, 3),
+
         // // test fsync
         // 1 => device.opendir(1,0),
         // 2 => device.readdir(1,0,0,128),
@@ -1714,6 +1850,17 @@ pub fn test_device(device: &FileSystemDevice){
         // 10 => device.flush(2, 1, 0),
         10 => device.lseek(2, 1, 2, 1),
         11 => device.lseek(2, 1, 2, 1),
+        // 1 => device.opendir(1,0),
+        // 2 => device.readdir(1,0,0,128),
+        // 3 => device.lookup(1, "testl"),
+        // 1 => device.opendir(1,0),
+        // 2 => device.readdir(1,0,0,128),
+        // 3 => device.lookup(1, "testh"),
+        // 4 => device.setxattr(2, "guset_field", &[63,31], 0),
+        // 5 => device.getxattr(2, "guset_field", 3),
+        // 6 => device.listxattr(2, 255),
+        // 7 => device.removexattr(2, "guest_field"),
+        // 8 => device.access(2, 1),
         // 3 => device.mkdir(1, 0o755, 0o777, "MkdirTest"),
         // 3 => device.lookup(1, "testh"),
         // 4 => device.open(2, 2),
@@ -1780,6 +1927,10 @@ pub fn test_device(device: &FileSystemDevice){
         // 7 => device.readdir(1,0,0,128),
         // 8 => device.rmdir(1,"hht"),
         // 9 => device.readdir(1,0,0,128),
+        15 => device.lookup(1, "dwxnews"),
+        // 16 => device.lookup(2, "dwx"),
+        16 => device.opendir(2, 0),
+        17 => device.readdirplus(2, 0, 0, 1024),
         _ => ()
     };
 }
