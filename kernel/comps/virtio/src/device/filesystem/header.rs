@@ -59,7 +59,7 @@ pub trait AnyFuseDevice{
     fn lookup(&self, nodeid: u64, name: &str);
     fn open(&self, nodeid: u64, flags: u32);
     fn read(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
-    fn write(&self, nodeid: u64, fh: u64, offset: u64, data: &str);
+    fn write(&self, nodeid: u64, fh: u64, offset: u64, data: &[u8]);
     fn mknod(&self, nodeid: u64, mode: u32, mask: u32, name: &str);
     fn rename(&self, nodeid: u64, newdir: u64, oldname: &str, newname: &str);
     fn rename2(&self, nodeid: u64, newdir: u64, flags: u32, oldname: &str, newname: &str);

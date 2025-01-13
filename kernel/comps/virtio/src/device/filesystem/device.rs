@@ -468,10 +468,13 @@ impl AnyFuseDevice for FileSystemDevice{
     /// 
     /// Notice: Virtiofsd device will read all device-readable data claimed in descriptor table,
     /// hence the size of claimed device-readable part need to exactly be header size + write header size + original data size
-    fn write(&self, nodeid: u64, fh: u64, offset: u64, data: &str){
+    fn write(&self, nodeid: u64, fh: u64, offset: u64, data: &[u8]){
         let mut request_queue = self.request_queues[0].disable_irq().lock();
 
-        let prepared_data = fuse_pad_str(data, false);
+        let pad_len = (8 - (data.len() & 0x7)) & 0x7;
+        let pad_buffer = vec![0u8; pad_len];
+        let prepared_data = [data, pad_buffer.as_slice()].concat();
+        
         let writein = FuseWriteIn{
             fh: fh,
             offset: offset,
@@ -1782,7 +1785,7 @@ impl FileSystemDevice{
 }
 
 
-static TEST_COUNTER: RwLock<u32> = RwLock::new(14);
+static TEST_COUNTER: RwLock<u32> = RwLock::new(0);
 pub fn test_device(device: &FileSystemDevice){
     let test_counter = {
         let mut test_counter = TEST_COUNTER.write();
@@ -1792,12 +1795,19 @@ pub fn test_device(device: &FileSystemDevice){
 
 
     match test_counter{
+        1 => device.lookup(1, "test"),
+        2 => device.open(2, 2),
+        3 => device.read(2, 0, 0, 128),
+
+
+
+
         // test fsyncdir
-        1 => device.opendir(1,0),
-        2 => device.readdir(1,0,0,128),
-        3 => device.lookup(1, "newdir"),
-        4 => device.opendir(2, 0),
-        5 => device.fsyncdir(2, 1, 3),
+        // 1 => device.opendir(1,0),
+        // 2 => device.readdir(1,0,0,128),
+        // 3 => device.lookup(1, "newdir"),
+        // 4 => device.opendir(2, 0),
+        // 5 => device.fsyncdir(2, 1, 3),
 
         // // test fsync
         // 1 => device.opendir(1,0),
@@ -1838,18 +1848,18 @@ pub fn test_device(device: &FileSystemDevice){
         
 
 
-        1 => device.opendir(1,0),
-        2 => device.readdir(1,0,0,128),
-        3 => device.lookup(1, "testh"),
-        4 => device.setxattr(2, "guset_field", &[63,31], 0),
-        5 => device.getxattr(2, "guset_field", 3),
-        6 => device.listxattr(2, 255),
-        7 => device.removexattr(2, "guest_field"),
-        8 => device.access(2, 1),
-        9 => device.open(2, 2),
+        // 1 => device.opendir(1,0),
+        // 2 => device.readdir(1,0,0,128),
+        // 3 => device.lookup(1, "testh"),
+        // 4 => device.setxattr(2, "guset_field", &[63,31], 0),
+        // 5 => device.getxattr(2, "guset_field", 3),
+        // 6 => device.listxattr(2, 255),
+        // 7 => device.removexattr(2, "guest_field"),
+        // 8 => device.access(2, 1),
+        // 9 => device.open(2, 2),
         // 10 => device.flush(2, 1, 0),
-        10 => device.lseek(2, 1, 2, 1),
-        11 => device.lseek(2, 1, 2, 1),
+        // 10 => device.lseek(2, 1, 2, 1),
+        // 11 => device.lseek(2, 1, 2, 1),
         // 1 => device.opendir(1,0),
         // 2 => device.readdir(1,0,0,128),
         // 3 => device.lookup(1, "testl"),
@@ -1927,10 +1937,10 @@ pub fn test_device(device: &FileSystemDevice){
         // 7 => device.readdir(1,0,0,128),
         // 8 => device.rmdir(1,"hht"),
         // 9 => device.readdir(1,0,0,128),
-        15 => device.lookup(1, "dwxnews"),
+        // 15 => device.lookup(1, "dwxnews"),
         // 16 => device.lookup(2, "dwx"),
-        16 => device.opendir(2, 0),
-        17 => device.readdirplus(2, 0, 0, 1024),
+        // 16 => device.opendir(2, 0),
+        // 17 => device.readdirplus(2, 0, 0, 1024),
         _ => ()
     };
 }
