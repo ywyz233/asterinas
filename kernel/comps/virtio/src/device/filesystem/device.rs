@@ -1059,6 +1059,8 @@ impl AnyFuseDevice for FileSystemDevice{
 
     }
 
+    
+
     fn listxattr(&self, nodeid: u64, out_buf_size: u32){
         let mut request_queue = self.request_queues[0].disable_irq().lock();
 
@@ -1196,6 +1198,40 @@ impl AnyFuseDevice for FileSystemDevice{
         //Send msg
         let readable_len = header_len;
         self.send(concat_req.as_slice(), 0, &mut (*request_queue), readable_len, readable_len);
+    }
+
+    fn fsyncdir(&self, nodeid: u64, fh: u64, fsync_flags: u32){
+        let mut request_queue = self.request_queues[0].disable_irq().lock();
+
+        let fsyncin = FuseFsyncIn {
+            fh: fh,
+            fsync_flags: fsync_flags,
+            padding: 0,
+        };
+        // let prepared_name = fuse_pad_str(name, true);
+        let headerin = FuseInHeader{
+            len: (size_of::<FuseInHeader>() as u32 + size_of::<FuseFsyncIn>() as u32 ),
+            opcode: FuseOpcode::FuseFsyncdir as u32,
+            unique: 0,
+            nodeid: nodeid,
+            uid: 0,
+            gid: 0,
+            pid: 0,
+            total_extlen: 0,
+            padding: 0,
+        };
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
+        // let entryout_buffer = [0u8; size_of::<FuseEntryOut>()];
+
+        let headerin_bytes = headerin.as_bytes();
+        let fsyncin_bytes = fsyncin.as_bytes();
+        // let prepared_name_bytes = prepared_name.as_slice(); 
+        let concat_req = [headerin_bytes, fsyncin_bytes, &headerout_buffer].concat();
+        
+        //Send msg
+        let readable_len = size_of::<FuseInHeader>() + size_of::<FuseFsyncIn>();
+        self.send(concat_req.as_slice(),0, &mut (*request_queue), readable_len, readable_len);
+
     }
 }
 
@@ -1546,14 +1582,20 @@ pub fn test_device(device: &FileSystemDevice){
 
     match test_counter{
         
-
-        // test fsync
+        // test fsyncdir
         1 => device.opendir(1,0),
         2 => device.readdir(1,0,0,128),
-        3 => device.lookup(1, "testh"),
-        4 => device.open(2, 2),
-        5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
-        6 => device.fsync(2, 1, 3),
+        3 => device.lookup(1, "newdir"),
+        4 => device.opendir(2, 0),
+        5 => device.fsyncdir(2, 1, 3),
+
+        // // test fsync
+        // 1 => device.opendir(1,0),
+        // 2 => device.readdir(1,0,0,128),
+        // 3 => device.lookup(1, "testh"),
+        // 4 => device.open(2, 2),
+        // 5 => device.write(2, 1, 0, "Hello from Guest!!\n"),
+        // 6 => device.fsync(2, 1, 3),
         
 
         // // test releasedir
@@ -1586,14 +1628,14 @@ pub fn test_device(device: &FileSystemDevice){
         // 1 => device.opendir(1,0),
         // 2 => device.readdir(1,0,0,128),
         // 3 => device.lookup(1, "testl"),
-        1 => device.opendir(1,0),
-        2 => device.readdir(1,0,0,128),
-        3 => device.lookup(1, "testh"),
-        4 => device.setxattr(2, "guset_field", &[63,31], 0),
-        5 => device.getxattr(2, "guset_field", 3),
-        6 => device.listxattr(2, 255),
-        7 => device.removexattr(2, "guest_field"),
-        8 => device.access(2, 1),
+        // 1 => device.opendir(1,0),
+        // 2 => device.readdir(1,0,0,128),
+        // 3 => device.lookup(1, "testh"),
+        // 4 => device.setxattr(2, "guset_field", &[63,31], 0),
+        // 5 => device.getxattr(2, "guset_field", 3),
+        // 6 => device.listxattr(2, 255),
+        // 7 => device.removexattr(2, "guest_field"),
+        // 8 => device.access(2, 1),
         // 3 => device.mkdir(1, 0o755, 0o777, "MkdirTest"),
         // 3 => device.lookup(1, "testh"),
         // 4 => device.open(2, 2),
