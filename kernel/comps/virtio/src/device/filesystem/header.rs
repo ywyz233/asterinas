@@ -1,70 +1,64 @@
 use ostd::{
-    early_print, early_println, mm::{VmReader, VmWriter}, Error, Pod
+    mm::{VmReader, VmWriter}, Error
 };
 use crate::{device::filesystem::fuse::*, queue::VirtQueue};
 use alloc::{
-    string::ToString, vec::Vec, vec,
+    vec::Vec, vec,
 };
-
-#[derive(Debug)]
-#[repr(C)]
-pub struct VirtioFsReq{
-    //Device readable
-    pub headerin: FuseInHeader,
-    pub datain: Vec<u8>,
-
-    //Device writable
-    pub headerout: FuseOutHeader,
-    pub dataout: Vec<u8>,
-}
-
-impl VirtioFsReq{
-    pub fn into_bytes(&self) -> Vec<u8>{
-        let fuse_in_header = self.headerin.as_bytes();
-        let datain = self.datain.as_slice();
-        let fuse_out_header = self.headerout.as_bytes();
-        let dataout = self.dataout.as_slice();
-
-        
-        let total_len = fuse_in_header.len() + datain.len() + fuse_out_header.len() + dataout.len();
-
-        let mut concat_req= vec![0u8; total_len];
-        concat_req[0..fuse_in_header.len()].copy_from_slice(fuse_in_header);
-        concat_req[fuse_in_header.len()..(fuse_in_header.len() + datain.len())].copy_from_slice(datain);
-        
-        concat_req
-    }
-
-    // pub fn from_bytes(bytes: &[u8]) -> Self{
-    //     let mut base_idx = 0;
-    //     let headerin_len = size_of::<FuseInHeader>();
-    //     let headerin = FuseInHeader::from_bytes(&bytes[base_idx..base_idx + headerin_len]);
-    //     base_idx += headerin_len;
-    //     let data_in_len = headerin.len as usize - headerin_len;
-    //     let         
-    // }
-}
 
 /// Define the Fuse Device function interface
 pub trait AnyFuseDevice{
     // Util functions
     fn send(&self, concat_req: &[u8], request_queue_idx: usize, locked_request_queue: &mut VirtQueue, readable_len: usize, writeable_start: usize);
     fn sendhp(&self, concat_req: &[u8], locked_hp_queue: &mut VirtQueue, readable_len: usize, writeable_start: usize);
+    
     // Functions defined in Fuse
+
+    /// When the device is created, init should be called to negotiate the FUSE
+    /// protocol version, request structure, endianess and etc. with virtiofs daemon.
     fn init(&self);
+    
+    /// Handler of received init from virtiofs daemon. 
     fn handle_init(&self, init_out: FuseInitOut) -> bool;
+    
+    /// Read contents in a directory.
     fn readdir(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
+    
+    /// Open a directory, returns file handler fh.
     fn opendir(&self, nodeid: u64, flags: u32);
+    
+    /// Make a directory under the given parent directory.
     fn mkdir(&self, nodeid: u64, mode: u32, umask: u32, name: &str);
+    
+    /// Lookup the inode index and attributes of a file through file name.
     fn lookup(&self, nodeid: u64, name: &str);
+    
+    /// Open a file, returns a file handler fh.
     fn open(&self, nodeid: u64, flags: u32);
+    
+    /// Read a file from offset bytes to offset + size bytes.
     fn read(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
+    
+    /// Write data to the file at offset position.
     fn write(&self, nodeid: u64, fh: u64, offset: u64, data: &[u8]);
+    
+    /// Make an inode(file) with the given privilege and file name.
     fn mknod(&self, nodeid: u64, mode: u32, mask: u32, name: &str);
+    
+    /// Rename a file/directory.
     fn rename(&self, nodeid: u64, newdir: u64, oldname: &str, newname: &str);
+    
+    /// Support advanced operation based on rename operation. Advanced operation is
+    /// specified by flags
     fn rename2(&self, nodeid: u64, newdir: u64, flags: u32, oldname: &str, newname: &str);
+    
+    /// High priority operation, tell the device it should release the given file/directory.
     fn forget(&self, nodeid: u64, nlookup: u64);
+    
+    /// Get the attribute of specified file.
     fn getattr(&self, nodeid: u64, flags: u32, fh: u64);
+    
+    /// Set the attribute of specified file.
     fn setattr(
         &self, 
         nodeid: u64, 
@@ -82,36 +76,79 @@ pub trait AnyFuseDevice{
         uid: u32,
         gid: u32,
     );
+
+    /// Read the content of symbolic link.
     fn readlink(&self, nodeid: u64, out_buf_size: u32);
+
+    /// Create a symbolic link.
     /// name: the name of symbolic link file, 
     /// link_name: the name of target
     fn symlink(&self, nodeid: u64, name: &str, link_name: &str);
+    
+    /// Remove the specified directory.
     fn rmdir(&self, nodeid: u64, name: &str);
+    
+    /// Delete a hard link, when the link counter is reduced to zero, the file will be deleted.
     fn unlink(&self, nodeid: u64, name: &str);
+    
+    /// Create a hard link to the specified file.
     fn link(&self, nodeid: u64, oldnodeid: u64, name: &str);
+    
+    /// Get the status of the file system.
     fn statfs(&self, nodeid: u64);
+    
+    /// Copy a part of the content of the source file to destination file.
     fn copyfilerange(&self, nodeid: u64, fh_in: u64, off_in: u64, nodeid_out: u64, fh_out: u64, off_out: u64, len: u64, flags: u64);
+    
+    /// Release the file handler of a file.
     fn release(&self, nodeid: u64, fh: u64, flags: u32, release_flags: u32, lock_owner: u64);
+    
+    /// Release the file handler of a directory.
     fn releasedir(&self, nodeid: u64, fh: u64, flags: u32);
+    
+    /// Synchronize the data and metadata of a file to disk.
     fn fsync(&self, nodeid: u64, fh: u64, fsync_flags: u32);
+    
+    /// Synchronize the data and metadata of a directory to disk.
     fn fsyncdir(&self, nodeid: u64, fh: u64, fsync_flags: u32);
     
+    /// Set extra attribute for a file.
     /// setxattr_flags is set as zero
     fn setxattr(&self, nodeid: u64, name: &str, value: &[u8], flags: u32);
+    
+    /// Get the value of an extra attribute.
     /// The needed size of buffer will be returned if out_buf_size = 0
     fn getxattr(&self, nodeid: u64, name: &str, out_buf_size: u32);
+    
+    /// List all keys of extra attrbute of a file.
     /// The needed size of buffer will be returned if out_buf_size = 0
     fn listxattr(&self, nodeid: u64, out_buf_size: u32);
+    
+    /// Remove an extra attribute of a file.
     fn removexattr(&self, nodeid: u64, name: &str);
+    
+    /// Check the privilege of a user on specified file or directory.
     fn access(&self, nodeid: u64, mask: u32);
 
+    /// High priority request, tell the device to cancel the processing request.
     fn interrupt(&self);
+    
+    /// High priority request, equivalent to multiple call to forget function.
     fn batchforget(&self, forget_list: &[(u64, u64)]);
 
+    /// Write the data and metadata of a file to underlying data structure.
     fn flush(&self, nodeid: u64, fh: u64, lock_owner: u64);
+    
+    /// Pre-reserve space in the specified file.
     fn fallocate(&self, nodeid: u64, fh: u64, offset: u64, len: u64, mode: u32);
+    
+    /// Set the position of file cursor.
     fn lseek(&self, nodeid: u64, fh: u64, offset: u64, whence: u32);
+    
+    /// Create a file and returns with a file handler fh. 
     fn create(&self, nodeid: u64, flags: u32, mode: u32, mask: u32, name: &str);
+    
+    /// Supports advanced operation based on readdir operation. 
     fn readdirplus(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
 }
 
@@ -137,7 +174,7 @@ pub struct FuseReaddirplusOut{
 }
 
 impl FuseReaddirOut{
-    /// Read all directory entries from the buffer
+    /// Helper function, read all directory entries from the buffer
     pub fn read_dirent(reader: &mut VmReader<'_, ostd::mm::Infallible>, out_header: FuseOutHeader) -> FuseReaddirOut{
         let mut len  = out_header.len as i32 - size_of::<FuseOutHeader>() as i32;
         let mut dirents: Vec<FuseDirentWithName> = Vec::new();
@@ -161,7 +198,6 @@ impl FuseReaddirOut{
                 dirent: dirent,
                 name: file_name,
             });
-            // early_print!("len: {:?} ,dirlen: {:?}, name_len: {:?}\n", len, size_of::<FuseDirent>() as u32 + dirent.namelen, dirent.namelen);
             len -= size_of::<FuseDirent>() as i32 + dirent.namelen as i32 + pad_len as i32;
         }
         FuseReaddirOut { dirents: dirents }
@@ -169,7 +205,7 @@ impl FuseReaddirOut{
 }
 
 impl FuseReaddirplusOut{
-    /// Read all directory entries from the buffer
+    /// Helper function, read all directory entries from the buffer
     pub fn read_dirent(reader: &mut VmReader<'_, ostd::mm::Infallible>, out_header: FuseOutHeader) -> FuseReaddirplusOut{
         let mut len  = out_header.len as i32 - size_of::<FuseOutHeader>() as i32;
         let mut dirents: Vec<FuseDirentWithNamePlus> = Vec::new();
@@ -195,7 +231,6 @@ impl FuseReaddirplusOut{
                 dirent: dirent,
                 name: file_name,
             });
-            // early_print!("len: {:?} ,dirlen: {:?}, name_len: {:?}\n", len, size_of::<FuseDirent>() as u32 + dirent.namelen, dirent.namelen);
             len -= size_of::<FuseEntryOut>() as i32 + size_of::<FuseDirent>() as i32 + dirent.namelen as i32 + pad_len as i32;
         }
         FuseReaddirplusOut { dirents: dirents }
