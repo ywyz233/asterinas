@@ -55,7 +55,7 @@ pub trait AnyFuseDevice{
     fn handle_init(&self, init_out: FuseInitOut) -> bool;
     fn readdir(&self, nodeid: u64, fh: u64, offset: u64, size: u32);
     fn opendir(&self, nodeid: u64, flags: u32);
-    fn mkdir(&self, nodeid: u64, mode: u32, mask: u32, name: &str);
+    fn mkdir(&self, nodeid: u64, mode: u32, umask: u32, name: &str);
     fn lookup(&self, nodeid: u64, name: &str);
     fn open(&self, nodeid: u64, flags: u32);
     fn read(&self, nodeid: u64, fh: u64, offset: u64, size: u32);

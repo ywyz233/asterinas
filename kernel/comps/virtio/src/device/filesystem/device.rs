@@ -474,7 +474,7 @@ impl AnyFuseDevice for FileSystemDevice{
         let pad_len = (8 - (data.len() & 0x7)) & 0x7;
         let pad_buffer = vec![0u8; pad_len];
         let prepared_data = [data, pad_buffer.as_slice()].concat();
-        
+
         let writein = FuseWriteIn{
             fh: fh,
             offset: offset,
@@ -1192,7 +1192,7 @@ impl AnyFuseDevice for FileSystemDevice{
             mask: mask,
             padding: 0,
         };
-        let headerout_buffer = [0u8; size_of::<FuseAccessIn>()];
+        let headerout_buffer = [0u8; size_of::<FuseOutHeader>()];
 
         let headerin_bytes = headerin.as_bytes();
         let accessin_bytes = accessin.as_bytes();
@@ -1797,7 +1797,9 @@ pub fn test_device(device: &FileSystemDevice){
     match test_counter{
         1 => device.lookup(1, "test"),
         2 => device.open(2, 2),
-        3 => device.read(2, 0, 0, 128),
+        3 => device.write(2, 0, 0, "Hello from guest!".as_bytes()),
+        // 3 => device.read(2, 0, 0, 128),
+
 
 
 

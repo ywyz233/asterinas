@@ -1,3 +1,7 @@
+/*
+    We directly use the structs defined in virtiofsd source code.
+*/
+
 use bitflags;
 use ostd::Pod;
 
@@ -73,6 +77,42 @@ bitflags::bitflags! {
 		const FUSE_INIT_EXT = FUSE_INIT_EXT;
 		const FUSE_SETXATTR_EXT = FUSE_SETXATTR_EXT;
 	}
+}
+
+// Flags returned by the OPEN request.
+/// Bypass page cache for this open file.
+const FOPEN_DIRECT_IO: u32 = 1 << 0;
+
+/// Don't invalidate the data cache on open.
+const FOPEN_KEEP_CACHE: u32 = 1 << 1;
+
+/// The file is not seekable.
+const FOPEN_NONSEEKABLE: u32 = 1 << 2;
+
+/// Allow caching this directory.
+const FOPEN_CACHE_DIR: u32 = 1 << 3;
+
+/// The file is stream-like (no file position at all).
+const FOPEN_STREAM: u32 = 1 << 4;
+
+/// Don't flush data cache on close (unless FUSE_WRITEBACK_CACHE)
+const FOPEN_NOFLUSH: u32 = 1 << 5;
+
+/// Allow concurrent direct writes on the same inode
+const FOPEN_PARALLEL_DIRECT_WRITES: u32 = 1 << 6;
+
+bitflags::bitflags! {
+    /// Options controlling the behavior of files opened by the server in response
+    /// to an open or create request.
+    pub struct FuseOpenOptions: u32 {
+        const DIRECT_IO = FOPEN_DIRECT_IO;
+        const KEEP_CACHE = FOPEN_KEEP_CACHE;
+        const NONSEEKABLE = FOPEN_NONSEEKABLE;
+        const CACHE_DIR = FOPEN_CACHE_DIR;
+        const STREAM = FOPEN_CACHE_DIR;
+        const NOFLUSH = FOPEN_NOFLUSH;
+        const PARALLEL_DIRECT_WRITES = FOPEN_PARALLEL_DIRECT_WRITES;
+    }
 }
 
 // Bitmasks for `fuse_setattr_in.valid`.
