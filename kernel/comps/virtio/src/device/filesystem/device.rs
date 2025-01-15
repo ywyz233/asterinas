@@ -1743,6 +1743,10 @@ impl FileSystemDevice{
             _ => {
             }
         }
+        drop(hp_queue);
+        
+        // FOR TEST
+        test_device(&self); 
     }
 }
 
